@@ -154,8 +154,9 @@ class DNSReconTool(BaseTool):
                     error="DNSRecon not installed. Install with: pip install dnsrecon"
                 )
             
-            # Run dnsrecon
-            cmd = ['dnsrecon', '-d', domain, '-t', 'std', '--json', '/tmp/dnsrecon_output.json']
+            # Run dnsrecon with std type (includes SOA, NS, A, AAAA, MX, SRV)
+            # Use stdout capture instead of JSON file for better reliability
+            cmd = ['dnsrecon', '-d', domain, '-t', 'std']
             
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -168,20 +169,63 @@ class DNSReconTool(BaseTool):
                 timeout=self.timeout
             )
             
-            # Parse results
+            # Parse results from stdout
+            # Format: [*] 	 TYPE value1 value2 ...
             records = []
-            output_file = Path('/tmp/dnsrecon_output.json')
-            if output_file.exists():
-                with open(output_file, 'r') as f:
-                    content = f.read()
-                    # DNSRecon outputs one JSON object per line
-                    for line in content.strip().split('\n'):
-                        if line.strip():
+            if stdout:
+                output_lines = stdout.decode('utf-8', errors='ignore').split('\n')
+                for line in output_lines:
+                    line = line.strip()
+                    # Skip empty lines, headers, and summary lines
+                    if not line or line.startswith('[*] std:') or line.startswith('[-]') or \
+                       line.startswith('[+]') and 'Records Found' in line or \
+                       line.startswith('Enumerating'):
+                        continue
+                    
+                    # Parse DNSRecon output format: [*] 	 TYPE value1 value2 ...
+                    if line.startswith('[*]'):
+                        parts = line.split()
+                        if len(parts) >= 3:
                             try:
-                                records.append(json.loads(line))
-                            except json.JSONDecodeError:
+                                record_type = parts[1]
+                                if record_type in ['SOA', 'NS', 'A', 'AAAA', 'MX', 'SRV', 'TXT', 'CNAME']:
+                                    record = {
+                                        'type': record_type,
+                                        'raw': line,
+                                        'values': parts[2:]  # All values after type
+                                    }
+                                    # For A records, first value is domain, second is IP
+                                    if record_type == 'A' and len(parts) >= 4:
+                                        record['domain'] = parts[2]
+                                        record['ip'] = parts[3]
+                                    # For NS/SOA, first value is hostname, second might be IP
+                                    elif record_type in ['NS', 'SOA'] and len(parts) >= 3:
+                                        record['hostname'] = parts[2]
+                                        if len(parts) >= 4:
+                                            record['ip'] = parts[3]
+                                    # For TXT, combine all values
+                                    elif record_type == 'TXT':
+                                        record['domain'] = parts[2] if len(parts) > 2 else domain
+                                        record['text'] = ' '.join(parts[3:]) if len(parts) > 3 else ''
+                                    
+                                    records.append(record)
+                            except Exception as e:
+                                logger.debug(f"Failed to parse DNSRecon line: {line}, error: {e}")
                                 pass
-                output_file.unlink()
+            
+            # Also try JSON output as fallback
+            if not records:
+                output_file = Path('/tmp/dnsrecon_output.json')
+                if output_file.exists():
+                    with open(output_file, 'r') as f:
+                        content = f.read()
+                        for line in content.strip().split('\n'):
+                            if line.strip():
+                                try:
+                                    records.append(json.loads(line))
+                                except json.JSONDecodeError:
+                                    pass
+                    output_file.unlink()
             
             execution_time = time.time() - start_time
             
@@ -215,114 +259,6 @@ class DNSReconTool(BaseTool):
             )
 
 
-class DirsearchTool(BaseTool):
-    """
-    Dirsearch directory/file brute-forcing
-    Requires dirsearch to be installed
-    """
-    
-    @property
-    def name(self) -> str:
-        return "dirsearch"
-    
-    @property
-    def description(self) -> str:
-        return "Directory and file brute-forcing using dirsearch"
-    
-    @property
-    def category(self) -> str:
-        return "web"
-    
-    async def run(self, target: str) -> ToolResult:
-        """Run dirsearch"""
-        import time
-        start_time = time.time()
-        
-        try:
-            # Ensure target has protocol
-            if not target.startswith(('http://', 'https://')):
-                target = f"https://{target}"
-            
-            # Check if dirsearch is available
-            try:
-                result = subprocess.run(
-                    ['dirsearch', '--version'],
-                    capture_output=True,
-                    timeout=5
-                )
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                return self._create_result(
-                    target=target,
-                    success=False,
-                    error="Dirsearch not installed. Install from: https://github.com/maurosoria/dirsearch"
-                )
-            
-            # Run dirsearch with limited wordlist for speed
-            output_file = Path('/tmp/dirsearch_output.json')
-            cmd = [
-                'dirsearch',
-                '-u', target,
-                '-e', 'php,html,js,txt,json',
-                '--json-report', str(output_file),
-                '--quiet',
-                '--threads', '10',
-                '--max-time', '60'
-            ]
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.timeout
-            )
-            
-            # Parse results
-            findings = []
-            if output_file.exists():
-                with open(output_file, 'r') as f:
-                    try:
-                        data = json.load(f)
-                        findings = data.get('results', [])
-                    except json.JSONDecodeError:
-                        pass
-                output_file.unlink()
-            
-            execution_time = time.time() - start_time
-            
-            if findings:
-                return self._create_result(
-                    target=target,
-                    success=True,
-                    data={'findings': findings, 'count': len(findings)},
-                    execution_time=execution_time,
-                    metadata={'source': 'dirsearch'}
-                )
-            else:
-                return self._create_result(
-                    target=target,
-                    success=False,
-                    error="No directories/files found or tool execution failed",
-                    execution_time=execution_time
-                )
-        except asyncio.TimeoutError:
-            return self._create_result(
-                target=target,
-                success=False,
-                error="Tool execution timeout"
-            )
-        except Exception as e:
-            logger.error(f"Dirsearch error: {e}")
-            return self._create_result(
-                target=target,
-                success=False,
-                error=str(e)
-            )
-
-
 class WaybackTool(BaseTool):
     """
     Wayback Machine URL extraction
@@ -344,60 +280,47 @@ class WaybackTool(BaseTool):
     async def run(self, target: str) -> ToolResult:
         """Extract Wayback URLs"""
         import time
+        import aiohttp
+        from urllib.parse import quote
         start_time = time.time()
         
         try:
             domain = target.replace('https://', '').replace('http://', '').split('/')[0]
-            
-            # Try waybackurls (Go tool) first
-            waybackurls_available = False
-            try:
-                result = subprocess.run(
-                    ['waybackurls', '-version'],
-                    capture_output=True,
-                    timeout=5
-                )
-                waybackurls_available = True
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
-            
             urls = []
             
-            if waybackurls_available:
-                # Use waybackurls
-                cmd = ['waybackurls', domain]
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.timeout
-                )
-                
-                if stdout:
-                    urls = [line.strip().decode() for line in stdout.split(b'\n') if line.strip()]
-            else:
-                # Fallback to waybackpy or direct API
+            # Try waybackpy first (already installed)
+            try:
+                import waybackpy
+                wayback = waybackpy.Url(domain)
+                # Get recent snapshots
+                urls_data = wayback.near(year=2023, month=1)
+                urls = [url.url for url in urls_data]
+                logger.info(f"Waybackpy found {len(urls)} URLs")
+            except Exception as e:
+                logger.debug(f"waybackpy failed: {e}, trying direct API")
+            
+            # Fallback to direct Wayback Machine API
+            if not urls:
                 try:
-                    import waybackpy
-                    wayback = waybackpy.Url(domain)
-                    urls_data = wayback.near(year=2020, month=1)
-                    urls = [url.url for url in urls_data]
-                except ImportError:
-                    # Direct API call
-                    import aiohttp
-                    api_url = f"http://web.archive.org/cdx/search/cdx?url={domain}/*&output=json&collapse=urlkey"
+                    api_url = f"https://web.archive.org/cdx/search/cdx?url={quote(domain)}/*&output=json&collapse=urlkey&limit=1000"
                     
                     async with aiohttp.ClientSession() as session:
-                        async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        async with session.get(
+                            api_url,
+                            timeout=aiohttp.ClientTimeout(total=30),
+                            headers={'User-Agent': 'recon-again/0.1.0'}
+                        ) as response:
                             if response.status == 200:
                                 data = await response.json()
                                 if data and len(data) > 1:
                                     # First row is headers, skip it
-                                    urls = [row[2] for row in data[1:] if len(row) > 2]
+                                    # Format: [timestamp, original, url, ...]
+                                    urls = [row[2] for row in data[1:] if len(row) > 2 and row[2]]
+                                    # Remove duplicates
+                                    urls = list(set(urls))
+                                    logger.info(f"Wayback API found {len(urls)} URLs")
+                except Exception as e:
+                    logger.error(f"Wayback API call failed: {e}")
             
             execution_time = time.time() - start_time
             
@@ -456,31 +379,111 @@ class SherlockTool(BaseTool):
         
         try:
             # Extract username (remove @ if present)
+            # Skip if target looks like a domain (contains dots and no @)
+            if '.' in target and '@' not in target:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="Sherlock is for username enumeration, not domains. Use a username as target.",
+                    execution_time=0.0
+                )
+            
             username = target.replace('@', '').strip()
             
-            # Check if sherlock is available
-            try:
-                result = subprocess.run(
-                    ['sherlock', '--version'],
-                    capture_output=True,
-                    timeout=5
-                )
-            except (FileNotFoundError, subprocess.TimeoutExpired):
+            # Check if sherlock is available (try multiple paths)
+            sherlock_path = None
+            possible_paths = [
+                'sherlock',
+                '/usr/local/bin/sherlock',
+                '/opt/sherlock/sherlock_project/sherlock.py',
+                '/opt/sherlock/sherlock_project/__main__.py',
+                'python3 /opt/sherlock/sherlock_project/sherlock.py',
+                'python3 -m sherlock_project.sherlock'
+            ]
+            
+            for path in possible_paths:
+                try:
+                    if path.startswith('python3'):
+                        # Test if Python script exists
+                        if ' -m ' in path:
+                            # Module path
+                            result = subprocess.run(
+                                path.split() + ['--version'],
+                                capture_output=True,
+                                timeout=5
+                            )
+                            if result.returncode == 0 or result.returncode == 2:  # 2 is help/version exit
+                                sherlock_path = path
+                                break
+                        else:
+                            # Script path
+                            script_path = path.split()[-1]
+                            if Path(script_path).exists():
+                                sherlock_path = path
+                                break
+                    else:
+                        result = subprocess.run(
+                            [path, '--version'] if path != 'sherlock' else ['sherlock', '--version'],
+                            capture_output=True,
+                            timeout=5
+                        )
+                        # Exit code 2 often means help/version was shown
+                        if result.returncode in [0, 2] or 'sherlock' in result.stderr.decode('utf-8', errors='ignore').lower():
+                            sherlock_path = path
+                            break
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    continue
+            
+            if not sherlock_path:
                 return self._create_result(
                     target=target,
                     success=False,
                     error="Sherlock not installed. Install from: https://github.com/sherlock-project/sherlock"
                 )
             
-            # Run sherlock
+            # Run sherlock - use module approach or direct Python execution
             output_file = Path(f'/tmp/sherlock_{username}.json')
-            cmd = [
-                'sherlock',
-                '--json',
-                '--output', str(output_file),
-                '--timeout', '10',
-                username
-            ]
+            
+            # Prefer module execution if available, otherwise use direct script
+            if '/opt/sherlock' in str(sherlock_path) or not sherlock_path:
+                # Use module execution (most reliable)
+                cmd = [
+                    'python3', '-m', 'sherlock_project.sherlock',
+                    '--json',
+                    '--output', str(output_file),
+                    '--timeout', '10',
+                    '--print-found',
+                    username
+                ]
+            elif sherlock_path.startswith('python3'):
+                if ' -m ' in sherlock_path:
+                    cmd = sherlock_path.split() + [
+                        '--json',
+                        '--output', str(output_file),
+                        '--timeout', '10',
+                        '--print-found',
+                        username
+                    ]
+                else:
+                    script_path = sherlock_path.split()[-1]
+                    cmd = [
+                        'python3',
+                        script_path,
+                        '--json',
+                        '--output', str(output_file),
+                        '--timeout', '10',
+                        '--print-found',
+                        username
+                    ]
+            else:
+                cmd = [
+                    sherlock_path,
+                    '--json',
+                    '--output', str(output_file),
+                    '--timeout', '10',
+                    '--print-found',
+                    username
+                ]
             
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -529,6 +532,750 @@ class SherlockTool(BaseTool):
             )
         except Exception as e:
             logger.error(f"Sherlock error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class TheHarvesterTool(BaseTool):
+    """
+    theHarvester passive email and subdomain harvesting
+    Passive tool, no API keys required
+    """
+    
+    @property
+    def name(self) -> str:
+        return "theharvester"
+    
+    @property
+    def description(self) -> str:
+        return "Passive email and subdomain harvesting using theHarvester"
+    
+    @property
+    def category(self) -> str:
+        return "osint"
+    
+    async def run(self, target: str) -> ToolResult:
+        """Run theHarvester"""
+        import time
+        start_time = time.time()
+        
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            
+            # Check if theHarvester is available
+            try:
+                result = subprocess.run(
+                    ['theHarvester', '--version'],
+                    capture_output=True,
+                    timeout=5
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                # Try alternative command
+                try:
+                    result = subprocess.run(
+                        ['theharvester', '--version'],
+                        capture_output=True,
+                        timeout=5
+                    )
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    return self._create_result(
+                        target=target,
+                        success=False,
+                        error="theHarvester not installed. Install with: pip install theHarvester"
+                    )
+            
+            # Run theHarvester with passive sources only
+            # -b: sources (all, baidu, bing, etc.)
+            # -d: domain
+            # -f: output file
+            output_file = Path('/tmp/theharvester_output.xml')
+            cmd = [
+                'theHarvester',
+                '-d', domain,
+                '-b', 'all',  # Use all passive sources
+                '-f', str(output_file),
+                '-l', '500'  # Limit results
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.timeout
+            )
+            
+            # Parse results
+            emails = []
+            hosts = []
+            ips = []
+            
+            if output_file.exists():
+                # Parse XML output
+                try:
+                    import xml.etree.ElementTree as ET
+                    tree = ET.parse(output_file)
+                    root = tree.getroot()
+                    
+                    # Extract emails
+                    for email in root.findall('.//email'):
+                        if email.text:
+                            emails.append(email.text.strip())
+                    
+                    # Extract hosts
+                    for host in root.findall('.//host'):
+                        if host.text:
+                            hosts.append(host.text.strip())
+                    
+                    # Extract IPs
+                    for ip in root.findall('.//ip'):
+                        if ip.text:
+                            ips.append(ip.text.strip())
+                except Exception as e:
+                    logger.debug(f"XML parsing failed: {e}, trying text parsing")
+                    # Fallback to text parsing
+                    with open(output_file, 'r') as f:
+                        content = f.read()
+                        # Extract emails
+                        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                        emails = list(set(re.findall(email_pattern, content)))
+                        # Extract hosts/domains
+                        host_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+                        hosts = [h for h in re.findall(host_pattern, content) if domain in h]
+                
+                output_file.unlink()
+            
+            execution_time = time.time() - start_time
+            
+            if emails or hosts or ips:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={
+                        'emails': list(set(emails)),
+                        'hosts': list(set(hosts)),
+                        'ips': list(set(ips)),
+                        'email_count': len(set(emails)),
+                        'host_count': len(set(hosts)),
+                        'ip_count': len(set(ips))
+                    },
+                    execution_time=execution_time,
+                    metadata={'source': 'theHarvester'}
+                )
+            else:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="No results found or tool execution failed",
+                    execution_time=execution_time
+                )
+        except asyncio.TimeoutError:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Tool execution timeout"
+            )
+        except Exception as e:
+            logger.error(f"theHarvester error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class GauTool(BaseTool):
+    """
+    gau (Get All URLs) - Extract URLs from common sources
+    Passive tool, no API keys required
+    """
+    
+    @property
+    def name(self) -> str:
+        return "gau"
+    
+    @property
+    def description(self) -> str:
+        return "Extract URLs from common sources using gau"
+    
+    @property
+    def category(self) -> str:
+        return "web"
+    
+    async def run(self, target: str) -> ToolResult:
+        """Run gau"""
+        import time
+        start_time = time.time()
+        
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            
+            # Check if gau is available
+            try:
+                result = subprocess.run(
+                    ['gau', '--version'],
+                    capture_output=True,
+                    timeout=5
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="gau not installed. Install from: https://github.com/lc/gau"
+                )
+            
+            # Run gau
+            cmd = ['gau', domain, '--subs']
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.timeout
+            )
+            
+            # Parse results
+            urls = []
+            if stdout:
+                urls = [line.strip().decode() for line in stdout.split(b'\n') if line.strip()]
+                urls = list(set(urls))  # Remove duplicates
+            
+            execution_time = time.time() - start_time
+            
+            if urls:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={'urls': urls, 'count': len(urls)},
+                    execution_time=execution_time,
+                    metadata={'source': 'gau'}
+                )
+            else:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="No URLs found or tool execution failed",
+                    execution_time=execution_time
+                )
+        except asyncio.TimeoutError:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Tool execution timeout"
+            )
+        except Exception as e:
+            logger.error(f"gau error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class HoleheTool(BaseTool):
+    """
+    Holehe - Email account existence checker
+    Passive tool, no API keys required
+    """
+    
+    @property
+    def name(self) -> str:
+        return "holehe"
+    
+    @property
+    def description(self) -> str:
+        return "Check if email accounts exist on various platforms using Holehe"
+    
+    @property
+    def category(self) -> str:
+        return "osint"
+    
+    async def run(self, target: str) -> ToolResult:
+        """Run Holehe"""
+        import time
+        start_time = time.time()
+        
+        try:
+            # Extract email (remove @ if present, but Holehe needs full email)
+            if '@' not in target:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="Holehe requires an email address as target"
+                )
+            
+            email = target.strip()
+            
+            # Check if holehe is available
+            try:
+                result = subprocess.run(
+                    ['holehe', '--version'],
+                    capture_output=True,
+                    timeout=5
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                # Try Python module
+                try:
+                    import holehe
+                except ImportError:
+                    return self._create_result(
+                        target=target,
+                        success=False,
+                        error="Holehe not installed. Install with: pip install holehe"
+                    )
+            
+            # Run holehe
+            # Try CLI first, then Python module
+            findings = []
+            
+            try:
+                # CLI approach
+                cmd = ['holehe', email, '--only-used']
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.timeout
+                )
+                
+                if stdout:
+                    output = stdout.decode('utf-8', errors='ignore')
+                    # Parse output - format: [*] platform: exists/not exists
+                    for line in output.split('\n'):
+                        if '[*]' in line or '[+]' in line:
+                            parts = line.split(':')
+                            if len(parts) >= 2:
+                                platform = parts[0].replace('[*]', '').replace('[+]', '').strip()
+                                status = parts[1].strip()
+                                if 'exists' in status.lower() or 'used' in status.lower():
+                                    findings.append({
+                                        'platform': platform,
+                                        'status': 'exists',
+                                        'raw': line.strip()
+                                    })
+            except Exception as e:
+                logger.debug(f"Holehe CLI failed: {e}, trying Python module")
+                # Python module approach
+                try:
+                    import holehe
+                    results = holehe.find(email)
+                    for result in results:
+                        if result.get('exists', False):
+                            findings.append({
+                                'platform': result.get('name', 'unknown'),
+                                'status': 'exists',
+                                'email': email
+                            })
+                except Exception as e2:
+                    logger.error(f"Holehe Python module failed: {e2}")
+            
+            execution_time = time.time() - start_time
+            
+            if findings:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={'findings': findings, 'count': len(findings)},
+                    execution_time=execution_time,
+                    metadata={'source': 'holehe'}
+                )
+            else:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="No accounts found or tool execution failed",
+                    execution_time=execution_time
+                )
+        except asyncio.TimeoutError:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Tool execution timeout"
+            )
+        except Exception as e:
+            logger.error(f"Holehe error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class MaigretTool(BaseTool):
+    """
+    Maigret - Username enumeration across platforms
+    Passive tool, no API keys required
+    """
+    
+    @property
+    def name(self) -> str:
+        return "maigret"
+    
+    @property
+    def description(self) -> str:
+        return "Username enumeration across social platforms using Maigret"
+    
+    @property
+    def category(self) -> str:
+        return "osint"
+    
+    async def run(self, target: str) -> ToolResult:
+        """Run Maigret"""
+        import time
+        start_time = time.time()
+        
+        try:
+            # Extract username (remove @ if present)
+            username = target.replace('@', '').strip()
+            
+            # Skip if target looks like a domain
+            if '.' in target and '@' not in target:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="Maigret is for username enumeration, not domains. Use a username as target.",
+                    execution_time=0.0
+                )
+            
+            # Check if maigret is available
+            try:
+                result = subprocess.run(
+                    ['maigret', '--version'],
+                    capture_output=True,
+                    timeout=5
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                # Try Python module
+                try:
+                    import maigret
+                except ImportError:
+                    return self._create_result(
+                        target=target,
+                        success=False,
+                        error="Maigret not installed. Install with: pip install maigret"
+                    )
+            
+            # Run maigret
+            output_file = Path(f'/tmp/maigret_{username}.json')
+            cmd = [
+                'maigret',
+                username,
+                '--print-found',
+                '--json',
+                '--output', str(output_file),
+                '--timeout', '10'
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.timeout
+            )
+            
+            # Parse results
+            findings = []
+            if output_file.exists():
+                with open(output_file, 'r') as f:
+                    try:
+                        data = json.load(f)
+                        findings = data
+                    except json.JSONDecodeError:
+                        pass
+                output_file.unlink()
+            
+            execution_time = time.time() - start_time
+            
+            if findings:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={'findings': findings, 'count': len(findings)},
+                    execution_time=execution_time,
+                    metadata={'source': 'maigret'}
+                )
+            else:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="No accounts found or tool execution failed",
+                    execution_time=execution_time
+                )
+        except asyncio.TimeoutError:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Tool execution timeout"
+            )
+        except Exception as e:
+            logger.error(f"Maigret error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class ArjunTool(BaseTool):
+    """
+    Arjun - HTTP parameter discovery
+    Passive tool, no API keys required
+    """
+    
+    @property
+    def name(self) -> str:
+        return "arjun"
+    
+    @property
+    def description(self) -> str:
+        return "HTTP parameter discovery using Arjun"
+    
+    @property
+    def category(self) -> str:
+        return "web"
+    
+    async def run(self, target: str) -> ToolResult:
+        """Run Arjun"""
+        import time
+        start_time = time.time()
+        
+        try:
+            # Ensure target has protocol
+            if not target.startswith(('http://', 'https://')):
+                target = f"https://{target}"
+            
+            # Check if arjun is available
+            try:
+                result = subprocess.run(
+                    ['arjun', '--version'],
+                    capture_output=True,
+                    timeout=5
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                # Try Python module
+                try:
+                    import arjun
+                except ImportError:
+                    return self._create_result(
+                        target=target,
+                        success=False,
+                        error="Arjun not installed. Install with: pip install arjun"
+                    )
+            
+            # Run arjun
+            output_file = Path('/tmp/arjun_output.json')
+            cmd = [
+                'arjun',
+                '-u', target,
+                '--json',
+                '-o', str(output_file),
+                '--timeout', '10',
+                '--passive'  # Passive mode only
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.timeout
+            )
+            
+            # Parse results
+            parameters = []
+            if output_file.exists():
+                with open(output_file, 'r') as f:
+                    try:
+                        data = json.load(f)
+                        if isinstance(data, dict):
+                            parameters = data.get('params', [])
+                        elif isinstance(data, list):
+                            parameters = data
+                    except json.JSONDecodeError:
+                        pass
+                output_file.unlink()
+            
+            execution_time = time.time() - start_time
+            
+            if parameters:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={'parameters': parameters, 'count': len(parameters)},
+                    execution_time=execution_time,
+                    metadata={'source': 'arjun'}
+                )
+            else:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="No parameters found or tool execution failed",
+                    execution_time=execution_time
+                )
+        except asyncio.TimeoutError:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Tool execution timeout"
+            )
+        except Exception as e:
+            logger.error(f"Arjun error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class EmailHarvesterTool(BaseTool):
+    """
+    EmailHarvester - Email address discovery
+    Passive tool, no API keys required
+    """
+    
+    @property
+    def name(self) -> str:
+        return "emailharvester"
+    
+    @property
+    def description(self) -> str:
+        return "Email address discovery using EmailHarvester"
+    
+    @property
+    def category(self) -> str:
+        return "osint"
+    
+    async def run(self, target: str) -> ToolResult:
+        """Run EmailHarvester"""
+        import time
+        start_time = time.time()
+        
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            
+            # Check if EmailHarvester is available
+            # EmailHarvester is typically a Python script
+            emailharvester_paths = [
+                'emailHarvester',
+                'EmailHarvester',
+                'emailharvester',
+                '/usr/local/bin/emailHarvester',
+                '/opt/EmailHarvester/emailHarvester.py'
+            ]
+            
+            emailharvester_path = None
+            for path in emailharvester_paths:
+                try:
+                    if path.endswith('.py'):
+                        if Path(path).exists():
+                            emailharvester_path = path
+                            break
+                    else:
+                        result = subprocess.run(
+                            [path, '--help'],
+                            capture_output=True,
+                            timeout=5
+                        )
+                        if result.returncode in [0, 2]:
+                            emailharvester_path = path
+                            break
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    continue
+            
+            if not emailharvester_path:
+                # Try Python module
+                try:
+                    import emailHarvester
+                    emailharvester_path = 'python_module'
+                except ImportError:
+                    return self._create_result(
+                        target=target,
+                        success=False,
+                        error="EmailHarvester not installed. Install from: https://github.com/maldevel/EmailHarvester"
+                    )
+            
+            # Run EmailHarvester
+            emails = []
+            
+            if emailharvester_path == 'python_module':
+                # Use Python module
+                try:
+                    import emailHarvester
+                    # EmailHarvester typically searches Google, Bing, etc.
+                    # This is a simplified version
+                    emails = []  # Would need to implement module usage
+                except Exception as e:
+                    logger.error(f"EmailHarvester module error: {e}")
+            else:
+                # Use CLI
+                if emailharvester_path.endswith('.py'):
+                    cmd = ['python3', emailharvester_path, '-d', domain]
+                else:
+                    cmd = [emailharvester_path, '-d', domain]
+                
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.timeout
+                )
+                
+                if stdout:
+                    output = stdout.decode('utf-8', errors='ignore')
+                    # Parse email addresses from output
+                    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                    emails = list(set(re.findall(email_pattern, output)))
+            
+            execution_time = time.time() - start_time
+            
+            if emails:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={'emails': emails, 'count': len(emails)},
+                    execution_time=execution_time,
+                    metadata={'source': 'EmailHarvester'}
+                )
+            else:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="No emails found or tool execution failed",
+                    execution_time=execution_time
+                )
+        except asyncio.TimeoutError:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Tool execution timeout"
+            )
+        except Exception as e:
+            logger.error(f"EmailHarvester error: {e}")
             return self._create_result(
                 target=target,
                 success=False,

@@ -33,7 +33,6 @@
 - **python_tools.py**: Python-based tools (require dependencies)
   - `Sublist3rTool`: Subdomain enumeration
   - `DNSReconTool`: DNS record discovery
-  - `DirsearchTool`: Directory/file brute-forcing
   - `WaybackTool`: Wayback Machine URL extraction
   - `SherlockTool`: Username enumeration
 
@@ -104,7 +103,6 @@ recon-again/
 ### Python Tools (Require Installation)
 - ✅ Sublist3r (Subdomain Enumeration)
 - ✅ DNSRecon (DNS Records)
-- ✅ Dirsearch (Directory Brute-forcing)
 - ✅ Wayback Machine (Historical URLs)
 - ✅ Sherlock (Username Enumeration)
 

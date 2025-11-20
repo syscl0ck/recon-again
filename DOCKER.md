@@ -47,7 +47,6 @@ docker run --rm -it -v $(pwd)/results:/app/results -v $(pwd)/data:/app/data reco
   - dnsrecon
   - waybackpy
 - **External tools**:
-  - dirsearch (from GitHub)
   - sherlock (from GitHub)
   - waybackurls (Go binary, if available)
 

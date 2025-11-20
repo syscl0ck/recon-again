@@ -91,15 +91,19 @@ class ReconEngine:
     def _register_tools(self):
         """Dynamically register all available tools"""
         from ..tools import (
-            CrtShTool, UrlscanTool, HIBPTool,
-            Sublist3rTool, DNSReconTool, DirsearchTool,
-            WaybackTool, SherlockTool
+            CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            Sublist3rTool, DNSReconTool,
+            WaybackTool, SherlockTool,
+            TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
+            EmailHarvesterTool
         )
         
         tool_classes = [
-            CrtShTool, UrlscanTool, HIBPTool,
-            Sublist3rTool, DNSReconTool, DirsearchTool,
-            WaybackTool, SherlockTool
+            CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            Sublist3rTool, DNSReconTool,
+            WaybackTool, SherlockTool,
+            TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
+            EmailHarvesterTool
         ]
         
         for tool_class in tool_classes:
@@ -182,6 +186,18 @@ class ReconEngine:
                     session.results[tool_name] = result.to_dict()
                     
                     # Save tool result to database
+                    # Convert timestamp string to datetime if needed
+                    timestamp = result.timestamp
+                    if isinstance(timestamp, str):
+                        try:
+                            from datetime import datetime
+                            timestamp = datetime.fromisoformat(timestamp)
+                        except (ValueError, AttributeError):
+                            timestamp = datetime.now()
+                    elif timestamp is None:
+                        from datetime import datetime
+                        timestamp = datetime.now()
+                    
                     db_result = DBToolResult(
                         session_id=session_id,
                         tool_name=tool_name,
@@ -191,7 +207,7 @@ class ReconEngine:
                         error=result.error,
                         execution_time=result.execution_time,
                         metadata=result.metadata,
-                        timestamp=result.timestamp
+                        timestamp=timestamp
                     )
                     db_result.save()
                     
@@ -201,13 +217,15 @@ class ReconEngine:
                     session.results[tool_name] = {'error': str(e)}
                     
                     # Save error to database
+                    from datetime import datetime
                     db_result = DBToolResult(
                         session_id=session_id,
                         tool_name=tool_name,
                         target=target,
                         success=False,
                         error=str(e),
-                        execution_time=0.0
+                        execution_time=0.0,
+                        timestamp=datetime.now()
                     )
                     db_result.save()
                     

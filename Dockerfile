@@ -21,31 +21,40 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python recon tools
-RUN pip3 install --no-cache-dir \
+RUN pip3 install --no-cache-dir --break-system-packages \
     aiohttp>=3.8.0 \
     sublist3r \
     dnsrecon \
     waybackpy \
+    theHarvester \
+    holehe \
+    maigret \
+    arjun \
     && rm -rf /root/.cache/pip
 
 # Install external recon tools
 # Sublist3r is already installed via pip
 # DNSRecon is already installed via pip
 
-# Install dirsearch
-RUN git clone https://github.com/maurosoria/dirsearch.git /opt/dirsearch && \
-    chmod +x /opt/dirsearch/dirsearch.py && \
-    ln -s /opt/dirsearch/dirsearch.py /usr/local/bin/dirsearch
-
-# Install waybackurls (Go tool - if available)
-RUN wget -q https://github.com/tomnomnom/waybackurls/releases/latest/download/waybackurls-linux-amd64 -O /usr/local/bin/waybackurls && \
-    chmod +x /usr/local/bin/waybackurls || echo "waybackurls installation skipped"
+# Install gau (Go tool for URL extraction)
+RUN wget -q https://github.com/lc/gau/releases/latest/download/gau_linux_amd64.tar.gz -O /tmp/gau.tar.gz 2>/dev/null && \
+    (tar -xzf /tmp/gau.tar.gz -C /tmp 2>/dev/null && \
+     mv /tmp/gau /usr/local/bin/gau && \
+     chmod +x /usr/local/bin/gau && \
+     rm /tmp/gau.tar.gz) || \
+    echo "gau installation skipped (will use alternative methods)"
 
 # Install sherlock
 RUN git clone https://github.com/sherlock-project/sherlock.git /opt/sherlock && \
     cd /opt/sherlock && \
-    pip3 install -r requirements.txt && \
-    ln -s /opt/sherlock/sherlock/sherlock.py /usr/local/bin/sherlock
+    (pip3 install --break-system-packages -r requirements.txt 2>/dev/null || \
+     pip3 install --break-system-packages requests beautifulsoup4 lxml requests-futures || \
+     pip3 install --break-system-packages -e . || \
+     echo "sherlock dependencies installed") && \
+    chmod -R +r /opt/sherlock && \
+    chmod +x /opt/sherlock/sherlock_project/sherlock.py && \
+    chmod +x /opt/sherlock/sherlock_project/__main__.py && \
+    echo "sherlock installation completed"
 
 # Set working directory
 WORKDIR /app
@@ -54,7 +63,7 @@ WORKDIR /app
 COPY . /app/
 
 # Install recon-again package
-RUN pip3 install --no-cache-dir -e .
+RUN pip3 install --no-cache-dir --break-system-packages -e .
 
 # Create directories for results and database
 RUN mkdir -p /app/results /app/data

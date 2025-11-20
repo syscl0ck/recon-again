@@ -11,7 +11,7 @@
 ### Features
 - ✅ Kali Linux base image for security tooling
 - ✅ Pre-installed Python recon tools (sublist3r, dnsrecon, waybackpy)
-- ✅ External tools (dirsearch, sherlock, waybackurls)
+- ✅ External tools (sherlock, waybackurls)
 - ✅ Volume mounts for results and database
 - ✅ Configuration file mounting
 - ✅ Easy docker-compose workflow

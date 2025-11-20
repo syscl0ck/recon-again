@@ -37,6 +37,8 @@ ENV/
 results/
 *.json
 !config.example.json
+data/
+*.db
 
 # Config
 config.json

@@ -188,7 +188,13 @@ class ToolResult:
         
         data_json = json.dumps(self.data) if self.data is not None else None
         metadata_json = json.dumps(self.metadata) if self.metadata else None
-        timestamp_str = self.timestamp.isoformat() if self.timestamp else None
+        # Handle timestamp - could be string or datetime
+        if isinstance(self.timestamp, str):
+            timestamp_str = self.timestamp
+        elif self.timestamp:
+            timestamp_str = self.timestamp.isoformat()
+        else:
+            timestamp_str = None
         
         cursor = db.execute(
             """INSERT INTO tool_results 

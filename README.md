@@ -19,13 +19,19 @@ recon-again is a modern, modular reconnaissance framework that combines the powe
 - **crt.sh** - Certificate transparency log search
 - **urlscan.io** - Historical scan search and domain discovery
 - **Have I Been Pwned** - Breach database lookup
+- **phonebook.cz** - Employee and contact enumeration (emails & phone numbers)
 
 ### Python-Based (Require Dependencies)
 - **Sublist3r** - Subdomain enumeration
 - **DNSRecon** - DNS record enumeration
-- **Dirsearch** - Directory/file brute-forcing
 - **Wayback Machine** - Historical URL extraction
 - **Sherlock** - Username enumeration across platforms
+- **theHarvester** - Passive email and subdomain harvesting
+- **gau** - URL extraction from common sources
+- **Holehe** - Email account existence checker
+- **Maigret** - Username enumeration (more aggressive than Sherlock)
+- **Arjun** - HTTP parameter discovery
+- **EmailHarvester** - Email address discovery from search engines
 
 ## 🛠️ Installation
 
@@ -75,8 +81,12 @@ For full functionality, install optional dependencies:
 pip install sublist3r dnsrecon waybackpy
 
 # Or install external tools separately:
-# - dirsearch: https://github.com/maurosoria/dirsearch
 # - sherlock: https://github.com/sherlock-project/sherlock
+# - gau: https://github.com/lc/gau
+# - theHarvester: https://github.com/laramies/theHarvester
+# - holehe: https://github.com/megadose/holehe
+# - maigret: https://github.com/soxoj/maigret
+# - arjun: https://github.com/s0md3v/Arjun
 # - waybackurls: https://github.com/tomnomnom/waybackurls
 ```
 

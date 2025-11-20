@@ -314,3 +314,103 @@ class HIBPTool(BaseTool):
                 error=str(e)
             )
 
+
+class PhonebookTool(BaseTool):
+    """
+    phonebook.cz API for employee and contact enumeration
+    Free API, no auth required
+    """
+    
+    @property
+    def name(self) -> str:
+        return "phonebook"
+    
+    @property
+    def description(self) -> str:
+        return "Employee and contact enumeration using phonebook.cz API"
+    
+    @property
+    def category(self) -> str:
+        return "osint"
+    
+    async def run(self, target: str) -> ToolResult:
+        """Query phonebook.cz for employees and contacts"""
+        import time
+        start_time = time.time()
+        
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            
+            # phonebook.cz API endpoints
+            # Email search: https://phonebook.cz/api/v1/search/emails?domain=example.com
+            # Phone search: https://phonebook.cz/api/v1/search/phones?domain=example.com
+            
+            emails = []
+            phones = []
+            
+            async with aiohttp.ClientSession() as session:
+                # Search for emails
+                email_url = f"https://phonebook.cz/api/v1/search/emails?domain={quote(domain)}"
+                try:
+                    async with session.get(
+                        email_url,
+                        headers={'User-Agent': 'recon-again/0.1.0'},
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if isinstance(data, dict):
+                                emails = data.get('emails', [])
+                            elif isinstance(data, list):
+                                emails = data
+                except Exception as e:
+                    logger.debug(f"Email search failed: {e}")
+                
+                # Search for phone numbers
+                phone_url = f"https://phonebook.cz/api/v1/search/phones?domain={quote(domain)}"
+                try:
+                    async with session.get(
+                        phone_url,
+                        headers={'User-Agent': 'recon-again/0.1.0'},
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if isinstance(data, dict):
+                                phones = data.get('phones', [])
+                            elif isinstance(data, list):
+                                phones = data
+                except Exception as e:
+                    logger.debug(f"Phone search failed: {e}")
+            
+            execution_time = time.time() - start_time
+            
+            if emails or phones:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={
+                        'emails': emails,
+                        'phones': phones,
+                        'email_count': len(emails),
+                        'phone_count': len(phones),
+                        'total_contacts': len(emails) + len(phones)
+                    },
+                    execution_time=execution_time,
+                    metadata={'source': 'phonebook.cz'}
+                )
+            else:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="No contacts found",
+                    execution_time=execution_time
+                )
+        except Exception as e:
+            logger.error(f"phonebook.cz error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
