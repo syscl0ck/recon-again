@@ -1,0 +1,14 @@
+# Core dependencies
+aiohttp>=3.8.0
+
+# Optional tool dependencies (install as needed)
+# sublist3r
+# dnsrecon
+# waybackpy
+
+# Development dependencies
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# flake8>=6.0.0
+

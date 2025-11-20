@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  recon-again:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: recon-again:latest
+    container_name: recon-again
+    volumes:
+      # Mount results directory
+      - ./results:/app/results
+      # Mount database directory
+      - ./data:/app/data
+      # Mount config file (optional)
+      - ./config.json:/app/config.json:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Override command to keep container running
+    command: tail -f /dev/null
+    # Or run a specific recon command:
+    # command: recon-again example.com
+    networks:
+      - recon-network
+
+networks:
+  recon-network:
+    driver: bridge
+

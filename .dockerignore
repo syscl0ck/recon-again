@@ -33,17 +33,32 @@ ENV/
 *.swo
 *~
 
-# Results
+# Results (will be mounted as volume)
 results/
 *.json
 !config.example.json
 
-# Config
-config.json
+# Database (will be mounted as volume)
+data/
+*.db
 
-# OS
-.DS_Store
-Thumbs.db
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+*.md
+!README.md
+
+# Tests
+tests/
+.pytest_cache/
 
 # Logs
 *.log
+
