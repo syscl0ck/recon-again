@@ -12,6 +12,7 @@ import { VisualizationPanel } from './visualization';
 
 // Try to import sql.js, but make it optional
 let initSqlJs: any = null;
+
 try {
     // Use require with error handling
     const sqljs = require('sql.js');
@@ -87,6 +88,13 @@ async function initSQL(): Promise<void> {
     if (!SQL && initSqlJs) {
         try {
             SQL = await initSqlJs();
+            // Store the SQL instance globally for use in visualization
+            try {
+                const { setGlobalSQL } = await import('./visualization');
+                setGlobalSQL(SQL);
+            } catch (e) {
+                console.warn('Could not set global SQL in visualization module:', e);
+            }
         } catch (error) {
             console.error('Failed to initialize SQL.js:', error);
             throw error;
@@ -94,6 +102,10 @@ async function initSQL(): Promise<void> {
     } else if (!initSqlJs) {
         throw new Error('sql.js module not available. Please reinstall the extension dependencies.');
     }
+}
+
+export function getGlobalSQL(): any {
+    return SQL;
 }
 
 function getDatabase(dbPath: string | null): any {

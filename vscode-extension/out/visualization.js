@@ -37,9 +37,19 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VisualizationPanel = void 0;
+exports.setGlobalSQL = setGlobalSQL;
+exports.getGlobalSQL = getGlobalSQL;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+// Global SQL instance (initialized in extension.ts)
+let globalSQL = null;
+function setGlobalSQL(sql) {
+    globalSQL = sql;
+}
+function getGlobalSQL() {
+    return globalSQL;
+}
 class VisualizationPanel {
     static createOrShow(extensionPath, context) {
         const column = vscode.window.activeTextEditor
@@ -311,9 +321,39 @@ class VisualizationPanel {
             return { error: 'Database not found at data/recon_again.db' };
         }
         try {
-            // Import sql.js dynamically
-            const sqljs = require('sql.js');
-            const SQL = sqljs.default || sqljs;
+            // Use the global SQL instance
+            let SQL = globalSQL || getGlobalSQL();
+            if (!SQL) {
+                // Try to get it from the extension module
+                try {
+                    // Dynamic import to avoid circular dependency
+                    const extModule = require('../out/extension');
+                    SQL = extModule.getGlobalSQL();
+                }
+                catch (e) {
+                    // If that fails, try direct require
+                    try {
+                        const sqljs = require('sql.js');
+                        const initFn = sqljs.default || sqljs;
+                        if (typeof initFn === 'function') {
+                            // It's the init function, we can't use it synchronously here
+                            throw new Error('SQL.js needs to be initialized. Please wait a moment and try again.');
+                        }
+                        else if (initFn && initFn.Database) {
+                            SQL = initFn;
+                        }
+                        else {
+                            throw new Error('SQL.js Database constructor not found');
+                        }
+                    }
+                    catch (e2) {
+                        throw new Error('SQL.js not available. Please ensure the extension is properly activated.');
+                    }
+                }
+            }
+            if (!SQL || !SQL.Database) {
+                throw new Error('SQL.js not properly initialized. Please restart VSCode.');
+            }
             const buffer = fs.readFileSync(dbPath);
             const db = new SQL.Database(buffer);
             // Get total sessions

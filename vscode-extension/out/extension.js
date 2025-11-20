@@ -37,6 +37,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getGlobalSQL = getGlobalSQL;
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
@@ -78,6 +79,14 @@ async function initSQL() {
     if (!SQL && initSqlJs) {
         try {
             SQL = await initSqlJs();
+            // Store the SQL instance globally for use in visualization
+            try {
+                const { setGlobalSQL } = await Promise.resolve().then(() => __importStar(require('./visualization')));
+                setGlobalSQL(SQL);
+            }
+            catch (e) {
+                console.warn('Could not set global SQL in visualization module:', e);
+            }
         }
         catch (error) {
             console.error('Failed to initialize SQL.js:', error);
@@ -87,6 +96,9 @@ async function initSQL() {
     else if (!initSqlJs) {
         throw new Error('sql.js module not available. Please reinstall the extension dependencies.');
     }
+}
+function getGlobalSQL() {
+    return SQL;
 }
 function getDatabase(dbPath) {
     if (!dbPath || !fs.existsSync(dbPath)) {

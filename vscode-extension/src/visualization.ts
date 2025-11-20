@@ -6,6 +6,17 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
+// Global SQL instance (initialized in extension.ts)
+let globalSQL: any = null;
+
+export function setGlobalSQL(sql: any) {
+    globalSQL = sql;
+}
+
+export function getGlobalSQL(): any {
+    return globalSQL;
+}
+
 export class VisualizationPanel {
     public static currentPanel: VisualizationPanel | undefined;
     private static readonly viewType = 'reconAgainVisualization';
@@ -307,9 +318,39 @@ export class VisualizationPanel {
         }
 
         try {
-            // Import sql.js dynamically
-            const sqljs = require('sql.js');
-            const SQL = sqljs.default || sqljs;
+            // Use the global SQL instance
+            let SQL = globalSQL || getGlobalSQL();
+            
+            if (!SQL) {
+                // Try to get it from the extension module
+                try {
+                    // Dynamic import to avoid circular dependency
+                    const extModule = require('../out/extension');
+                    SQL = extModule.getGlobalSQL();
+                } catch (e) {
+                    // If that fails, try direct require
+                    try {
+                        const sqljs = require('sql.js');
+                        const initFn = sqljs.default || sqljs;
+                        
+                        if (typeof initFn === 'function') {
+                            // It's the init function, we can't use it synchronously here
+                            throw new Error('SQL.js needs to be initialized. Please wait a moment and try again.');
+                        } else if (initFn && initFn.Database) {
+                            SQL = initFn;
+                        } else {
+                            throw new Error('SQL.js Database constructor not found');
+                        }
+                    } catch (e2) {
+                        throw new Error('SQL.js not available. Please ensure the extension is properly activated.');
+                    }
+                }
+            }
+            
+            if (!SQL || !SQL.Database) {
+                throw new Error('SQL.js not properly initialized. Please restart VSCode.');
+            }
+            
             const buffer = fs.readFileSync(dbPath);
             const db = new SQL.Database(buffer);
 
