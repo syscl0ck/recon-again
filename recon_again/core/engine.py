@@ -92,6 +92,7 @@ class ReconEngine:
         """Dynamically register all available tools"""
         from ..tools import (
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            CloudEnumTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
@@ -100,6 +101,7 @@ class ReconEngine:
         
         tool_classes = [
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            CloudEnumTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,

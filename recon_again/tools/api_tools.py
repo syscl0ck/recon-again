@@ -14,6 +14,133 @@ from .base import BaseTool, ToolResult
 logger = logging.getLogger(__name__)
 
 
+class CloudEnumTool(BaseTool):
+    """
+    Lightweight cloud resource discovery
+
+    Probes common object storage providers (AWS S3, GCP Storage, Azure Blob)
+    using likely bucket names derived from the target.
+    """
+
+    @property
+    def name(self) -> str:
+        return "cloud_enum"
+
+    @property
+    def description(self) -> str:
+        return "Enumerate potential cloud storage buckets for a target"
+
+    @property
+    def category(self) -> str:
+        return "cloud"
+
+    async def run(self, target: str) -> ToolResult:
+        """Probe for common cloud storage buckets"""
+        import time
+
+        start_time = time.time()
+
+        # Normalize target into something bucket-like
+        domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+        base_parts = domain.split('.')
+        base_name = base_parts[0] if base_parts else domain
+
+        candidates = {
+            domain,
+            domain.replace('.', '-'),
+            domain.replace('.', ''),
+            base_name,
+            f"{base_name}-assets",
+            f"{base_name}-static",
+            f"{base_name}-files",
+            f"{base_name}-media",
+            f"{base_name}-cdn",
+        }
+
+        providers = [
+            ("aws_s3", "https://{bucket}.s3.amazonaws.com"),
+            ("gcp_storage", "https://storage.googleapis.com/{bucket}"),
+            ("azure_blob", "https://{bucket}.blob.core.windows.net"),
+        ]
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        interesting_statuses = {200, 301, 302, 307, 308, 401, 403, 405}
+        discovered: List[Dict[str, Any]] = []
+        timeouts = 0
+
+        async with aiohttp.ClientSession(headers={'User-Agent': 'recon-again/0.1.0'}) as session:
+            nonlocal_timeouts = [0]
+
+            async def probe(provider: str, template: str, bucket: str):
+                url = template.format(bucket=bucket)
+                try:
+                    async with session.head(url, timeout=timeout, allow_redirects=True) as response:
+                        status = response.status
+
+                        # Some providers return helpful bodies for non-existent buckets
+                        body = ""
+                        if status not in interesting_statuses:
+                            try:
+                                body = await response.text()
+                            except Exception:
+                                body = ""
+
+                        if status in interesting_statuses:
+                            access = 'public' if status == 200 else 'restricted'
+                            return {
+                                'provider': provider,
+                                'bucket': bucket,
+                                'url': url,
+                                'status': status,
+                                'access': access
+                            }
+
+                        if 'NoSuchBucket' in body or 'The specified bucket does not exist' in body:
+                            return None
+
+                        return None
+                except asyncio.TimeoutError:
+                    nonlocal_timeouts[0] += 1
+                    return None
+                except Exception as e:  # pragma: no cover - network dependent
+                    logger.debug(f"{provider} probe failed for {bucket}: {e}")
+                    return None
+
+            tasks = [
+                probe(provider, template, bucket)
+                for bucket in candidates
+                for provider, template in providers
+            ]
+
+            results = await asyncio.gather(*tasks)
+
+            for result in results:
+                if result:
+                    discovered.append(result)
+
+            timeouts = nonlocal_timeouts[0]
+
+        execution_time = time.time() - start_time
+
+        metadata = {
+            'providers_checked': [p[0] for p in providers],
+            'candidate_buckets': len(candidates),
+            'checks_performed': len(candidates) * len(providers),
+            'timeouts': timeouts,
+        }
+
+        return self._create_result(
+            target=target,
+            success=True,
+            data={
+                'resources': discovered,
+                'found_count': len(discovered),
+            },
+            execution_time=execution_time,
+            metadata=metadata,
+        )
+
+
 class CrtShTool(BaseTool):
     """
     crt.sh certificate transparency search
