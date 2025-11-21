@@ -19,6 +19,7 @@ recon-again is a modern, modular reconnaissance framework that combines the powe
 - **crt.sh** - Certificate transparency log search
 - **urlscan.io** - Historical scan search and domain discovery
 - **Have I Been Pwned** - Breach database lookup
+- **CloudEnum** - Cloud storage bucket discovery across AWS, GCP, and Azure
 - **phonebook.cz** - Employee and contact enumeration (emails & phone numbers)
 
 ### Python-Based (Require Dependencies)

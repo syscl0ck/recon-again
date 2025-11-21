@@ -4,12 +4,19 @@ from .base import BaseTool, ToolResult
 
 # API-based tools (free, no installation needed)
 try:
-    from .api_tools import CrtShTool, UrlscanTool, HIBPTool, PhonebookTool
+    from .api_tools import (
+        CrtShTool,
+        UrlscanTool,
+        HIBPTool,
+        PhonebookTool,
+        CloudEnumTool,
+    )
 except ImportError:
     CrtShTool = None
     UrlscanTool = None
     HIBPTool = None
     PhonebookTool = None
+    CloudEnumTool = None
 
 # Python-based tools (require dependencies)
 try:
@@ -37,6 +44,7 @@ __all__ = [
     'UrlscanTool',
     'HIBPTool',
     'PhonebookTool',
+    'CloudEnumTool',
     'Sublist3rTool',
     'DNSReconTool',
     'WaybackTool',

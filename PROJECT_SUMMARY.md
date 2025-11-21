@@ -99,6 +99,7 @@ recon-again/
 - ✅ crt.sh (Certificate Transparency)
 - ✅ urlscan.io (Historical Scans)
 - ✅ Have I Been Pwned (Breach Database)
+- ✅ CloudEnum (Cloud storage bucket discovery)
 
 ### Python Tools (Require Installation)
 - ✅ Sublist3r (Subdomain Enumeration)
