@@ -1,5 +1,6 @@
 # Core dependencies
 aiohttp>=3.8.0
+neo4j>=5.0.0
 
 # Optional tool dependencies (install as needed)
 # sublist3r
