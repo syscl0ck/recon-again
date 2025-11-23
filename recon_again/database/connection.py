@@ -162,13 +162,30 @@ def init_db(db_path: Optional[str] = None):
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
     );
-    
+
+    -- Business intelligence table
+    CREATE TABLE IF NOT EXISTS business_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL UNIQUE,
+        target TEXT NOT NULL,
+        business_size TEXT,
+        incorporation_date TEXT,
+        locations TEXT,  -- JSON array of locations/headquarters
+        industry TEXT,
+        other_insights TEXT,  -- JSON object for extra interesting facts
+        source_tools TEXT,  -- JSON array of tool names used for analysis
+        analysis_data TEXT,  -- Full JSON returned by AI
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    );
+
     -- Create indexes for better performance
     CREATE INDEX IF NOT EXISTS idx_sessions_target ON sessions(target_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
     CREATE INDEX IF NOT EXISTS idx_tool_results_session ON tool_results(session_id);
     CREATE INDEX IF NOT EXISTS idx_tool_results_tool ON tool_results(tool_name);
     CREATE INDEX IF NOT EXISTS idx_targets_target ON targets(target);
+    CREATE INDEX IF NOT EXISTS idx_business_profiles_session ON business_profiles(session_id);
     """
     
     with db.transaction() as conn:

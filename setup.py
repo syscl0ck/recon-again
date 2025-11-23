@@ -21,6 +21,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "aiohttp>=3.8.0",
+        "neo4j>=5.0.0",
         "asyncio",
     ],
     extras_require={

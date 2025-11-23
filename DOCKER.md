@@ -17,6 +17,9 @@ docker-compose up -d
 # Execute reconnaissance
 docker-compose exec recon-again recon-again example.com
 
+# Access Neo4j Browser for graph exploration
+# http://localhost:7474
+
 # View logs
 docker-compose logs -f recon-again
 
@@ -57,10 +60,14 @@ docker run --rm -it -v $(pwd)/results:/app/results -v $(pwd)/data:/app/data reco
 
 ### Environment Variables
 - `PYTHONUNBUFFERED=1` - Real-time Python output
+- `NEO4J_URI` - Neo4j connection string (default: bolt://neo4j:7687)
+- `NEO4J_USER` / `NEO4J_PASSWORD` - Credentials for Neo4j
 
 ## Database in Docker
 
 The database is stored in `/app/data/recon_again.db` inside the container, which is mounted to `./data/recon_again.db` on the host.
+
+Neo4j graph data is persisted via the `neo4j-data` volume created by docker-compose.
 
 ### Initialize Database
 

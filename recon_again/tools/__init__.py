@@ -9,6 +9,10 @@ try:
         UrlscanTool,
         HIBPTool,
         PhonebookTool,
+        HunterTool,
+        ClearbitProspectorTool,
+        PeopleDataLabsTool, 
+        EmployeeSocialTool
         CloudEnumTool,
     )
 except ImportError:
@@ -16,6 +20,10 @@ except ImportError:
     UrlscanTool = None
     HIBPTool = None
     PhonebookTool = None
+    EmployeeSocialTool = None
+    HunterTool = None
+    ClearbitProspectorTool = None
+    PeopleDataLabsTool = None
     CloudEnumTool = None
 
 # Python-based tools (require dependencies)
@@ -25,6 +33,7 @@ try:
         TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
         EmailHarvesterTool
     )
+    from .web_tools import CorporateSiteScraperTool
 except ImportError:
     Sublist3rTool = None
     DNSReconTool = None
@@ -36,6 +45,7 @@ except ImportError:
     MaigretTool = None
     ArjunTool = None
     EmailHarvesterTool = None
+    CorporateSiteScraperTool = None
 
 __all__ = [
     'BaseTool',
@@ -44,6 +54,10 @@ __all__ = [
     'UrlscanTool',
     'HIBPTool',
     'PhonebookTool',
+    'EmployeeSocialTool',
+    'HunterTool',
+    'ClearbitProspectorTool',
+    'PeopleDataLabsTool',
     'CloudEnumTool',
     'Sublist3rTool',
     'DNSReconTool',
@@ -54,6 +68,7 @@ __all__ = [
     'HoleheTool',
     'MaigretTool',
     'ArjunTool',
-    'EmailHarvesterTool'
+    'EmailHarvesterTool',
+    'CorporateSiteScraperTool'
 ]
 

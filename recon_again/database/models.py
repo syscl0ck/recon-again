@@ -321,6 +321,105 @@ class AIAnalysis:
         return cls.from_row(row) if row else None
 
 
+@dataclass
+class BusinessProfile:
+    """AI-derived business intelligence from main site scraping."""
+
+    id: Optional[int] = None
+    session_id: str = ""
+    target: str = ""
+    business_size: Optional[str] = None
+    incorporation_date: Optional[str] = None
+    locations: List[str] = None
+    industry: Optional[str] = None
+    other_insights: List[Any] = None
+    source_tools: List[str] = None
+    analysis_data: Dict[str, Any] = None
+    created_at: Optional[datetime] = None
+
+    def __post_init__(self):
+        if self.locations is None:
+            self.locations = []
+        if self.other_insights is None:
+            self.other_insights = []
+        if self.source_tools is None:
+            self.source_tools = []
+        if self.analysis_data is None:
+            self.analysis_data = {}
+
+    def save(self) -> int:
+        """Save business profile to database"""
+        db = get_db()
+
+        locations_json = json.dumps(self.locations)
+        other_insights_json = json.dumps(self.other_insights)
+        source_tools_json = json.dumps(self.source_tools)
+        analysis_data_json = json.dumps(self.analysis_data)
+
+        if self.id:
+            db.execute(
+                """UPDATE business_profiles
+                   SET business_size = ?, incorporation_date = ?, locations = ?,
+                       industry = ?, other_insights = ?, source_tools = ?,
+                       analysis_data = ?
+                   WHERE id = ?""",
+                (
+                    self.business_size,
+                    self.incorporation_date,
+                    locations_json,
+                    self.industry,
+                    other_insights_json,
+                    source_tools_json,
+                    analysis_data_json,
+                    self.id,
+                ),
+            )
+            return self.id
+
+        cursor = db.execute(
+            """INSERT INTO business_profiles
+               (session_id, target, business_size, incorporation_date, locations,
+                industry, other_insights, source_tools, analysis_data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                self.session_id,
+                self.target,
+                self.business_size,
+                self.incorporation_date,
+                locations_json,
+                self.industry,
+                other_insights_json,
+                source_tools_json,
+                analysis_data_json,
+            ),
+        )
+        self.id = cursor.lastrowid
+        return self.id
+
+    @classmethod
+    def from_row(cls, row) -> "BusinessProfile":
+        return cls(
+            id=row["id"],
+            session_id=row["session_id"],
+            target=row["target"],
+            business_size=row["business_size"],
+            incorporation_date=row["incorporation_date"],
+            locations=json.loads(row["locations"]) if row["locations"] else [],
+            industry=row["industry"],
+            other_insights=json.loads(row["other_insights"]) if row["other_insights"] else [],
+            source_tools=json.loads(row["source_tools"]) if row["source_tools"] else [],
+            analysis_data=json.loads(row["analysis_data"]) if row["analysis_data"] else {},
+            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+        )
+
+    @classmethod
+    def get_by_session(cls, session_id: str) -> Optional["BusinessProfile"]:
+        """Get business profile for a session"""
+        db = get_db()
+        row = db.fetchone("SELECT * FROM business_profiles WHERE session_id = ?", (session_id,))
+        return cls.from_row(row) if row else None
+
+
 class Database:
     """Database operations wrapper"""
     
@@ -397,4 +496,9 @@ class Database:
             'tool_results_count': tool_results_count,
             'latest_session': Session.from_row(latest_session).to_dict() if latest_session else None
         }
+
+    @staticmethod
+    def get_business_profile(session_id: str) -> Optional['BusinessProfile']:
+        """Get business profile for a session"""
+        return BusinessProfile.get_by_session(session_id)
 
