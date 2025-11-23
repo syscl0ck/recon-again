@@ -6,6 +6,7 @@ Orchestrates tool execution, result aggregation, and AI-driven automation
 import asyncio
 import json
 import logging
+import os
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -13,7 +14,15 @@ from pathlib import Path
 
 from .ai_pilot import AIPilot
 from ..tools.base import BaseTool, ToolResult as ToolResultBase
-from ..database import init_db, get_db, Target, Session, ToolResult as DBToolResult, AIAnalysis
+from ..database import (
+    GraphDatabaseClient,
+    AIAnalysis,
+    Session,
+    Target,
+    ToolResult as DBToolResult,
+    get_db,
+    init_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +64,12 @@ class ReconEngine:
         self.sessions: Dict[str, ReconSession] = {}
         self.results_dir = Path(self.config.get('results_dir', './results'))
         self.results_dir.mkdir(exist_ok=True)
-        
+
+        # Initialize graph database for contact intelligence
+        self.graph_db = GraphDatabaseClient.from_config(self.config.get('graph', {}))
+        if self.graph_db and not self.graph_db.enabled:
+            self.graph_db = None
+
         # Initialize database
         db_path = db_path or self.config.get('db_path', './data/recon_again.db')
         init_db(db_path)
@@ -87,6 +101,13 @@ class ReconEngine:
             'tools': {
                 'timeout': 300,
                 'max_concurrent': 5
+            },
+            'graph': {
+                'enabled': True,
+                'uri': os.getenv('NEO4J_URI', 'bolt://neo4j:7687'),
+                'user': os.getenv('NEO4J_USER', 'neo4j'),
+                'password': os.getenv('NEO4J_PASSWORD', 'reconagain'),
+                'database': os.getenv('NEO4J_DATABASE', 'neo4j')
             }
         }
         
@@ -221,7 +242,10 @@ class ReconEngine:
                         timestamp=timestamp
                     )
                     db_result.save()
-                    
+
+                    # Store contact intelligence in graph database
+                    self._ingest_contacts(target, tool_name, result.data)
+
                     return result
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
@@ -343,7 +367,25 @@ class ReconEngine:
             return 'domain'
         else:
             return 'username'
-    
+
+    def _ingest_contacts(self, target: str, tool_name: str, data: Any):
+        """Push contact-focused tool output into the graph database."""
+        if not self.graph_db or not data or not isinstance(data, dict):
+            return
+
+        emails = data.get('emails')
+        phones = data.get('phones')
+        if emails or phones:
+            try:
+                self.graph_db.ingest_contacts(
+                    target=target,
+                    emails=emails,
+                    phones=phones,
+                    source=tool_name,
+                )
+            except Exception as exc:
+                logger.debug("Skipping graph ingestion for %s: %s", tool_name, exc)
+
     def list_tools(self) -> List[str]:
         """List all available tools"""
         return list(self.tools.keys())
