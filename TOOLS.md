@@ -52,6 +52,9 @@ EmailHarvester
 Epieos
 LinkedInt (employee mapping)
 Twint (Twitter intel, until X rate limits ruin your day)
+Hunter.io (employee emails)
+Clearbit Prospector (role-based contacts)
+People Data Labs (people search)
 
 # Breach Intel + Credentials
 HaveIBeenPwned API
