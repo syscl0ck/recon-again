@@ -6,6 +6,7 @@ No installation required, just API calls
 import aiohttp
 import asyncio
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from urllib.parse import quote
 
@@ -408,6 +409,128 @@ class PhonebookTool(BaseTool):
                 )
         except Exception as e:
             logger.error(f"phonebook.cz error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class EmployeeSocialTool(BaseTool):
+    """
+    Find potential employee social media profiles via DuckDuckGo
+
+    This tool performs search engine queries against common social media platforms
+    (LinkedIn, Twitter, GitHub, Facebook, Instagram) looking for profiles that
+    reference the target's domain or identifier.
+    """
+
+    @property
+    def name(self) -> str:
+        return "employee_social"
+
+    @property
+    def description(self) -> str:
+        return "Discover employee social media profiles related to the target"
+
+    @property
+    def category(self) -> str:
+        return "osint"
+
+    async def _search_duckduckgo(self, session: aiohttp.ClientSession, query: str, limit: int = 15) -> List[str]:
+        """Perform a DuckDuckGo HTML search and extract result URLs"""
+        url = f"https://duckduckgo.com/html/?q={quote(query)}"
+        async with session.get(
+            url,
+            headers={'User-Agent': 'recon-again/0.1.0'},
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as response:
+            if response.status != 200:
+                return []
+
+            html = await response.text()
+            links = re.findall(r'<a[^>]+class=\"result__a\"[^>]+href=\"(.*?)\"', html, flags=re.IGNORECASE)
+            cleaned = []
+            for link in links:
+                link = link.replace('https://duckduckgo.com/l/?kh=-1&uddg=', '')
+                cleaned.append(link)
+            return cleaned[:limit]
+
+    async def run(self, target: str) -> ToolResult:
+        """Search for employee social media profiles"""
+        import time
+
+        start_time = time.time()
+
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            base_term = domain
+
+            if '@' in target:
+                local_part, _, email_domain = target.partition('@')
+                base_term = email_domain or domain
+                additional_terms = [local_part]
+            else:
+                additional_terms = []
+
+            search_terms = [base_term]
+            if '.' in base_term:
+                org_hint = base_term.split('.')[0]
+                if org_hint and org_hint not in search_terms:
+                    search_terms.append(org_hint)
+
+            search_terms.extend([term for term in additional_terms if term])
+
+            platforms = {
+                'linkedin.com': "site:linkedin.com/in \"{term}\"",
+                'twitter.com': "site:twitter.com \"{term}\"",
+                'github.com': "site:github.com \"{term}\"",
+                'facebook.com': "site:facebook.com \"{term}\"",
+                'instagram.com': "site:instagram.com \"{term}\"",
+            }
+
+            platform_profiles: Dict[str, set] = {platform: set() for platform in platforms}
+            executed_queries: List[str] = []
+
+            async with aiohttp.ClientSession() as session:
+                for term in search_terms:
+                    for platform, query_template in platforms.items():
+                        query = query_template.format(term=term)
+                        executed_queries.append(query)
+                        results = await self._search_duckduckgo(session, query)
+                        for link in results:
+                            if platform in link:
+                                platform_profiles[platform].add(link)
+
+            combined_profiles = set()
+            for urls in platform_profiles.values():
+                combined_profiles.update(urls)
+
+            execution_time = time.time() - start_time
+
+            if combined_profiles:
+                return self._create_result(
+                    target=target,
+                    success=True,
+                    data={
+                        'profiles': sorted(combined_profiles),
+                        'by_platform': {platform: sorted(urls) for platform, urls in platform_profiles.items()},
+                        'query_count': len(executed_queries)
+                    },
+                    execution_time=execution_time,
+                    metadata={'source': 'duckduckgo', 'queries': executed_queries}
+                )
+
+            return self._create_result(
+                target=target,
+                success=False,
+                error="No social media profiles discovered",
+                execution_time=execution_time,
+                metadata={'source': 'duckduckgo', 'queries': executed_queries}
+            )
+
+        except Exception as e:
+            logger.error(f"Employee social media search error: {e}")
             return self._create_result(
                 target=target,
                 success=False,
