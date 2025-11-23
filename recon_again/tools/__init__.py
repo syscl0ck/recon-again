@@ -11,13 +11,15 @@ try:
         PhonebookTool,
         HunterTool,
         ClearbitProspectorTool,
-        PeopleDataLabsTool
+        PeopleDataLabsTool, 
+        EmployeeSocialTool
     )
 except ImportError:
     CrtShTool = None
     UrlscanTool = None
     HIBPTool = None
     PhonebookTool = None
+    EmployeeSocialTool = None
     HunterTool = None
     ClearbitProspectorTool = None
     PeopleDataLabsTool = None
@@ -50,6 +52,7 @@ __all__ = [
     'UrlscanTool',
     'HIBPTool',
     'PhonebookTool',
+    'EmployeeSocialTool',
     'HunterTool',
     'ClearbitProspectorTool',
     'PeopleDataLabsTool',

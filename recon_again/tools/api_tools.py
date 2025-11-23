@@ -6,6 +6,7 @@ No installation required, just API calls
 import aiohttp
 import asyncio
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from urllib.parse import quote
 
@@ -414,7 +415,14 @@ class PhonebookTool(BaseTool):
                 error=str(e)
             )
 
+class EmployeeSocialTool(BaseTool):
+    """
+    Find potential employee social media profiles via DuckDuckGo
 
+    This tool performs search engine queries against common social media platforms
+    (LinkedIn, Twitter, GitHub, Facebook, Instagram) looking for profiles that
+    reference the target's domain or identifier."""
+    
 class HunterTool(BaseTool):
     """
     Hunter.io domain search for employee contact discovery
@@ -520,7 +528,7 @@ class ClearbitProspectorTool(BaseTool):
 
     @property
     def name(self) -> str:
-        return "clearbit_prospector"
+        return "employee_social"
 
     @property
     def description(self) -> str:
@@ -530,6 +538,25 @@ class ClearbitProspectorTool(BaseTool):
     def category(self) -> str:
         return "osint"
 
+    async def _search_duckduckgo(self, session: aiohttp.ClientSession, query: str, limit: int = 15) -> List[str]:
+        """Perform a DuckDuckGo HTML search and extract result URLs"""
+        url = f"https://duckduckgo.com/html/?q={quote(query)}"
+        async with session.get(
+            url,
+            headers={'User-Agent': 'recon-again/0.1.0'},
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as response:
+            if response.status != 200:
+                return []
+
+            html = await response.text()
+            links = re.findall(r'<a[^>]+class=\"result__a\"[^>]+href=\"(.*?)\"', html, flags=re.IGNORECASE)
+            cleaned = []
+            for link in links:
+                link = link.replace('https://duckduckgo.com/l/?kh=-1&uddg=', '')
+                cleaned.append(link)
+            return cleaned[:limit]
+          
     @property
     def requires_auth(self) -> bool:
         return True

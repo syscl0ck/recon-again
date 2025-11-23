@@ -127,7 +127,7 @@ class ReconEngine:
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
-            EmailHarvesterTool, CorporateSiteScraperTool
+            EmailHarvesterTool, CorporateSiteScraperTool, EmployeeSocialTool
         )
 
         tool_classes = [
@@ -136,7 +136,7 @@ class ReconEngine:
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
-            EmailHarvesterTool, CorporateSiteScraperTool
+            EmailHarvesterTool, CorporateSiteScraperTool, EmployeeSocialTool
         ]
         
         for tool_class in tool_classes:
