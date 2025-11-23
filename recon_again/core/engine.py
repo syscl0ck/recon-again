@@ -75,6 +75,15 @@ class ReconEngine:
                 'model': 'openai/gpt-4-turbo',
                 'base_url': 'https://openrouter.ai/api/v1'
             },
+            'hunter': {
+                'api_key': None
+            },
+            'clearbit': {
+                'api_key': None
+            },
+            'peopledatalabs': {
+                'api_key': None
+            },
             'tools': {
                 'timeout': 300,
                 'max_concurrent': 5
@@ -92,14 +101,16 @@ class ReconEngine:
         """Dynamically register all available tools"""
         from ..tools import (
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            HunterTool, ClearbitProspectorTool, PeopleDataLabsTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
             EmailHarvesterTool
         )
-        
+
         tool_classes = [
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            HunterTool, ClearbitProspectorTool, PeopleDataLabsTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,

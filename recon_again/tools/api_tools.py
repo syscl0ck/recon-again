@@ -414,3 +414,287 @@ class PhonebookTool(BaseTool):
                 error=str(e)
             )
 
+
+class HunterTool(BaseTool):
+    """
+    Hunter.io domain search for employee contact discovery
+    Requires Hunter.io API key
+    """
+
+    @property
+    def name(self) -> str:
+        return "hunter"
+
+    @property
+    def description(self) -> str:
+        return "Discover emails and employees via Hunter.io domain search"
+
+    @property
+    def category(self) -> str:
+        return "osint"
+
+    @property
+    def requires_auth(self) -> bool:
+        return True
+
+    async def run(self, target: str) -> ToolResult:
+        """Query Hunter.io for employee emails on a domain"""
+        import time
+
+        start_time = time.time()
+        api_key = self.config.get('hunter', {}).get('api_key')
+
+        if not api_key:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Hunter.io API key not configured"
+            )
+
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            url = (
+                "https://api.hunter.io/v2/domain-search?"
+                f"domain={quote(domain)}&api_key={quote(api_key)}&limit=100"
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    headers={'User-Agent': 'recon-again/0.1.0'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        execution_time = time.time() - start_time
+                        return self._create_result(
+                            target=target,
+                            success=False,
+                            error=f"HTTP {response.status}",
+                            execution_time=execution_time
+                        )
+
+                    data = await response.json()
+                    payload = data.get('data', {}) if isinstance(data, dict) else {}
+                    emails = payload.get('emails', []) if isinstance(payload, dict) else []
+                    meta = payload.get('meta', {}) if isinstance(payload, dict) else {}
+
+                    simplified = []
+                    for email in emails:
+                        if isinstance(email, dict):
+                            simplified.append({
+                                'value': email.get('value'),
+                                'first_name': email.get('first_name'),
+                                'last_name': email.get('last_name'),
+                                'position': email.get('position'),
+                                'seniority': email.get('seniority'),
+                                'department': email.get('department'),
+                                'source_domain': domain
+                            })
+
+                    execution_time = time.time() - start_time
+                    return self._create_result(
+                        target=target,
+                        success=True,
+                        data={
+                            'emails': simplified,
+                            'email_count': len(simplified),
+                            'sources': meta.get('results') if isinstance(meta, dict) else None
+                        },
+                        execution_time=execution_time,
+                        metadata={'source': 'hunter.io'}
+                    )
+        except Exception as e:
+            logger.error(f"Hunter.io error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class ClearbitProspectorTool(BaseTool):
+    """
+    Clearbit Prospector API for finding people at a company domain
+    Requires Clearbit API key
+    """
+
+    @property
+    def name(self) -> str:
+        return "clearbit_prospector"
+
+    @property
+    def description(self) -> str:
+        return "Find employees and contact roles using Clearbit Prospector"
+
+    @property
+    def category(self) -> str:
+        return "osint"
+
+    @property
+    def requires_auth(self) -> bool:
+        return True
+
+    async def run(self, target: str) -> ToolResult:
+        """Query Clearbit Prospector for people at the target domain"""
+        import time
+
+        start_time = time.time()
+        api_key = self.config.get('clearbit', {}).get('api_key')
+
+        if not api_key:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Clearbit API key not configured"
+            )
+
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            url = f"https://prospector.clearbit.com/v1/people/search?domain={quote(domain)}"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    auth=aiohttp.BasicAuth(api_key, ''),
+                    headers={'User-Agent': 'recon-again/0.1.0'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        execution_time = time.time() - start_time
+                        return self._create_result(
+                            target=target,
+                            success=False,
+                            error=f"HTTP {response.status}",
+                            execution_time=execution_time
+                        )
+
+                    data = await response.json()
+                    people = data.get('results', []) if isinstance(data, dict) else []
+                    simplified = []
+                    for person in people:
+                        if not isinstance(person, dict):
+                            continue
+                        simplified.append({
+                            'name': person.get('name'),
+                            'title': person.get('title'),
+                            'seniority': person.get('seniority'),
+                            'department': person.get('department'),
+                            'email': person.get('email'),
+                            'linkedin': person.get('linkedin'),
+                            'location': person.get('location')
+                        })
+
+                    execution_time = time.time() - start_time
+                    return self._create_result(
+                        target=target,
+                        success=True,
+                        data={
+                            'people': simplified,
+                            'people_count': len(simplified),
+                            'pending': data.get('pending') if isinstance(data, dict) else None
+                        },
+                        execution_time=execution_time,
+                        metadata={'source': 'clearbit-prospector'}
+                    )
+        except Exception as e:
+            logger.error(f"Clearbit Prospector error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class PeopleDataLabsTool(BaseTool):
+    """
+    People Data Labs person search API
+    Requires People Data Labs API key
+    """
+
+    @property
+    def name(self) -> str:
+        return "peopledatalabs"
+
+    @property
+    def description(self) -> str:
+        return "Search People Data Labs for employees and contact metadata"
+
+    @property
+    def category(self) -> str:
+        return "osint"
+
+    @property
+    def requires_auth(self) -> bool:
+        return True
+
+    async def run(self, target: str) -> ToolResult:
+        """Query People Data Labs for people associated with a company domain"""
+        import time
+
+        start_time = time.time()
+        api_key = self.config.get('peopledatalabs', {}).get('api_key')
+
+        if not api_key:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="People Data Labs API key not configured"
+            )
+
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            url = (
+                "https://api.peopledatalabs.com/v5/person/search?"
+                f"api_key={quote(api_key)}&company.domain={quote(domain)}&size=25"
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    headers={'User-Agent': 'recon-again/0.1.0'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        execution_time = time.time() - start_time
+                        return self._create_result(
+                            target=target,
+                            success=False,
+                            error=f"HTTP {response.status}",
+                            execution_time=execution_time
+                        )
+
+                    data = await response.json()
+                    matches = data.get('data', []) if isinstance(data, dict) else []
+                    simplified = []
+                    for person in matches:
+                        if not isinstance(person, dict):
+                            continue
+                        simplified.append({
+                            'full_name': person.get('full_name'),
+                            'title': person.get('job_title'),
+                            'seniority': person.get('job_seniority'),
+                            'department': person.get('job_department'),
+                            'emails': person.get('emails'),
+                            'profiles': person.get('profiles')
+                        })
+
+                    execution_time = time.time() - start_time
+                    return self._create_result(
+                        target=target,
+                        success=True,
+                        data={
+                            'people': simplified,
+                            'people_count': len(simplified),
+                            'total_available': data.get('total') if isinstance(data, dict) else None
+                        },
+                        execution_time=execution_time,
+                        metadata={'source': 'people-data-labs'}
+                    )
+        except Exception as e:
+            logger.error(f"People Data Labs error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
