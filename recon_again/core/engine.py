@@ -6,6 +6,7 @@ Orchestrates tool execution, result aggregation, and AI-driven automation
 import asyncio
 import json
 import logging
+import os
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -13,7 +14,16 @@ from pathlib import Path
 
 from .ai_pilot import AIPilot
 from ..tools.base import BaseTool, ToolResult as ToolResultBase
-from ..database import init_db, get_db, Target, Session, ToolResult as DBToolResult, AIAnalysis
+from ..database import (
+    GraphDatabaseClient,
+    AIAnalysis,
+    BusinessProfile,
+    Session,
+    Target,
+    ToolResult as DBToolResult,
+    get_db,
+    init_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +65,12 @@ class ReconEngine:
         self.sessions: Dict[str, ReconSession] = {}
         self.results_dir = Path(self.config.get('results_dir', './results'))
         self.results_dir.mkdir(exist_ok=True)
-        
+
+        # Initialize graph database for contact intelligence
+        self.graph_db = GraphDatabaseClient.from_config(self.config.get('graph', {}))
+        if self.graph_db and not self.graph_db.enabled:
+            self.graph_db = None
+
         # Initialize database
         db_path = db_path or self.config.get('db_path', './data/recon_again.db')
         init_db(db_path)
@@ -75,9 +90,25 @@ class ReconEngine:
                 'model': 'openai/gpt-4-turbo',
                 'base_url': 'https://openrouter.ai/api/v1'
             },
+            'hunter': {
+                'api_key': None
+            },
+            'clearbit': {
+                'api_key': None
+            },
+            'peopledatalabs': {
+                'api_key': None
+            },
             'tools': {
                 'timeout': 300,
                 'max_concurrent': 5
+            },
+            'graph': {
+                'enabled': True,
+                'uri': os.getenv('NEO4J_URI', 'bolt://neo4j:7687'),
+                'user': os.getenv('NEO4J_USER', 'neo4j'),
+                'password': os.getenv('NEO4J_PASSWORD', 'reconagain'),
+                'database': os.getenv('NEO4J_DATABASE', 'neo4j')
             }
         }
         
@@ -92,18 +123,20 @@ class ReconEngine:
         """Dynamically register all available tools"""
         from ..tools import (
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            HunterTool, ClearbitProspectorTool, PeopleDataLabsTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
-            EmailHarvesterTool, EmployeeSocialTool
+            EmailHarvesterTool, CorporateSiteScraperTool, EmployeeSocialTool
         )
-        
+
         tool_classes = [
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
+            HunterTool, ClearbitProspectorTool, PeopleDataLabsTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
-            EmailHarvesterTool, EmployeeSocialTool
+            EmailHarvesterTool, CorporateSiteScraperTool, EmployeeSocialTool
         ]
         
         for tool_class in tool_classes:
@@ -210,7 +243,10 @@ class ReconEngine:
                         timestamp=timestamp
                     )
                     db_result.save()
-                    
+
+                    # Store contact intelligence in graph database
+                    self._ingest_contacts(target, tool_name, result.data)
+
                     return result
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
@@ -253,6 +289,25 @@ class ReconEngine:
                     analysis_data=analysis
                 )
                 ai_analysis.save()
+
+        # Derive business intelligence from main site web scrapers
+        business_data = self._collect_main_site_data(session.results)
+        if self.ai_pilot and business_data:
+            business_profile = await self.ai_pilot.analyze_business_profile(target, business_data)
+            if business_profile:
+                session.results['business_profile'] = business_profile
+                profile_record = BusinessProfile(
+                    session_id=session_id,
+                    target=target,
+                    business_size=business_profile.get('business_size'),
+                    incorporation_date=business_profile.get('incorporation_date'),
+                    locations=business_profile.get('locations', []),
+                    industry=business_profile.get('industry'),
+                    other_insights=business_profile.get('other_insights', []),
+                    source_tools=[item['tool'] for item in business_data if 'tool' in item],
+                    analysis_data=business_profile,
+                )
+                profile_record.save()
         
         # Update session in database
         db_session = Session.get_by_session_id(session_id)
@@ -309,6 +364,10 @@ class ReconEngine:
         ai_analysis = AIAnalysis.get_by_session(session_id)
         if ai_analysis:
             results['ai_analysis'] = ai_analysis.analysis_data
+
+        business_profile = BusinessProfile.get_by_session(session_id)
+        if business_profile:
+            results['business_profile'] = business_profile.analysis_data
         
         # Reconstruct session
         session = ReconSession(
@@ -332,7 +391,25 @@ class ReconEngine:
             return 'domain'
         else:
             return 'username'
-    
+
+    def _ingest_contacts(self, target: str, tool_name: str, data: Any):
+        """Push contact-focused tool output into the graph database."""
+        if not self.graph_db or not data or not isinstance(data, dict):
+            return
+
+        emails = data.get('emails')
+        phones = data.get('phones')
+        if emails or phones:
+            try:
+                self.graph_db.ingest_contacts(
+                    target=target,
+                    emails=emails,
+                    phones=phones,
+                    source=tool_name,
+                )
+            except Exception as exc:
+                logger.debug("Skipping graph ingestion for %s: %s", tool_name, exc)
+
     def list_tools(self) -> List[str]:
         """List all available tools"""
         return list(self.tools.keys())
@@ -348,4 +425,34 @@ class ReconEngine:
                 'requires_auth': tool.requires_auth
             }
         return None
+
+    def _collect_main_site_data(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Collect data from web-category tools to feed into business profiling."""
+
+        main_site_data: List[Dict[str, Any]] = []
+        for tool_name, result in results.items():
+            if tool_name in {'ai_analysis', 'business_profile'}:
+                continue
+
+            tool = self.tools.get(tool_name)
+            if not tool or getattr(tool, 'category', None) != 'web':
+                continue
+
+            if isinstance(result, dict) and result.get('success') and result.get('data'):
+                trimmed_data = self._trim_data(result.get('data'))
+                main_site_data.append({'tool': tool_name, 'data': trimmed_data})
+
+        return main_site_data
+
+    def _trim_data(self, data: Any, max_items: int = 50) -> Any:
+        """Trim large datasets before sending to the AI model."""
+
+        if isinstance(data, list):
+            return data[:max_items]
+        if isinstance(data, dict):
+            trimmed = {}
+            for key, value in data.items():
+                trimmed[key] = self._trim_data(value, max_items)
+            return trimmed
+        return data
 

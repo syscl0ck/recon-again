@@ -415,14 +415,115 @@ class PhonebookTool(BaseTool):
                 error=str(e)
             )
 
-
 class EmployeeSocialTool(BaseTool):
     """
     Find potential employee social media profiles via DuckDuckGo
 
     This tool performs search engine queries against common social media platforms
     (LinkedIn, Twitter, GitHub, Facebook, Instagram) looking for profiles that
-    reference the target's domain or identifier.
+    reference the target's domain or identifier."""
+    
+class HunterTool(BaseTool):
+    """
+    Hunter.io domain search for employee contact discovery
+    Requires Hunter.io API key
+    """
+
+    @property
+    def name(self) -> str:
+        return "hunter"
+
+    @property
+    def description(self) -> str:
+        return "Discover emails and employees via Hunter.io domain search"
+
+    @property
+    def category(self) -> str:
+        return "osint"
+
+    @property
+    def requires_auth(self) -> bool:
+        return True
+
+    async def run(self, target: str) -> ToolResult:
+        """Query Hunter.io for employee emails on a domain"""
+        import time
+
+        start_time = time.time()
+        api_key = self.config.get('hunter', {}).get('api_key')
+
+        if not api_key:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Hunter.io API key not configured"
+            )
+
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            url = (
+                "https://api.hunter.io/v2/domain-search?"
+                f"domain={quote(domain)}&api_key={quote(api_key)}&limit=100"
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    headers={'User-Agent': 'recon-again/0.1.0'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        execution_time = time.time() - start_time
+                        return self._create_result(
+                            target=target,
+                            success=False,
+                            error=f"HTTP {response.status}",
+                            execution_time=execution_time
+                        )
+
+                    data = await response.json()
+                    payload = data.get('data', {}) if isinstance(data, dict) else {}
+                    emails = payload.get('emails', []) if isinstance(payload, dict) else []
+                    meta = payload.get('meta', {}) if isinstance(payload, dict) else {}
+
+                    simplified = []
+                    for email in emails:
+                        if isinstance(email, dict):
+                            simplified.append({
+                                'value': email.get('value'),
+                                'first_name': email.get('first_name'),
+                                'last_name': email.get('last_name'),
+                                'position': email.get('position'),
+                                'seniority': email.get('seniority'),
+                                'department': email.get('department'),
+                                'source_domain': domain
+                            })
+
+                    execution_time = time.time() - start_time
+                    return self._create_result(
+                        target=target,
+                        success=True,
+                        data={
+                            'emails': simplified,
+                            'email_count': len(simplified),
+                            'sources': meta.get('results') if isinstance(meta, dict) else None
+                        },
+                        execution_time=execution_time,
+                        metadata={'source': 'hunter.io'}
+                    )
+        except Exception as e:
+            logger.error(f"Hunter.io error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class ClearbitProspectorTool(BaseTool):
+    """
+    Clearbit Prospector API for finding people at a company domain
+    Requires Clearbit API key
     """
 
     @property
@@ -431,7 +532,7 @@ class EmployeeSocialTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Discover employee social media profiles related to the target"
+        return "Find employees and contact roles using Clearbit Prospector"
 
     @property
     def category(self) -> str:
@@ -455,82 +556,169 @@ class EmployeeSocialTool(BaseTool):
                 link = link.replace('https://duckduckgo.com/l/?kh=-1&uddg=', '')
                 cleaned.append(link)
             return cleaned[:limit]
+          
+    @property
+    def requires_auth(self) -> bool:
+        return True
 
     async def run(self, target: str) -> ToolResult:
-        """Search for employee social media profiles"""
+        """Query Clearbit Prospector for people at the target domain"""
         import time
 
         start_time = time.time()
+        api_key = self.config.get('clearbit', {}).get('api_key')
 
-        try:
-            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
-            base_term = domain
-
-            if '@' in target:
-                local_part, _, email_domain = target.partition('@')
-                base_term = email_domain or domain
-                additional_terms = [local_part]
-            else:
-                additional_terms = []
-
-            search_terms = [base_term]
-            if '.' in base_term:
-                org_hint = base_term.split('.')[0]
-                if org_hint and org_hint not in search_terms:
-                    search_terms.append(org_hint)
-
-            search_terms.extend([term for term in additional_terms if term])
-
-            platforms = {
-                'linkedin.com': "site:linkedin.com/in \"{term}\"",
-                'twitter.com': "site:twitter.com \"{term}\"",
-                'github.com': "site:github.com \"{term}\"",
-                'facebook.com': "site:facebook.com \"{term}\"",
-                'instagram.com': "site:instagram.com \"{term}\"",
-            }
-
-            platform_profiles: Dict[str, set] = {platform: set() for platform in platforms}
-            executed_queries: List[str] = []
-
-            async with aiohttp.ClientSession() as session:
-                for term in search_terms:
-                    for platform, query_template in platforms.items():
-                        query = query_template.format(term=term)
-                        executed_queries.append(query)
-                        results = await self._search_duckduckgo(session, query)
-                        for link in results:
-                            if platform in link:
-                                platform_profiles[platform].add(link)
-
-            combined_profiles = set()
-            for urls in platform_profiles.values():
-                combined_profiles.update(urls)
-
-            execution_time = time.time() - start_time
-
-            if combined_profiles:
-                return self._create_result(
-                    target=target,
-                    success=True,
-                    data={
-                        'profiles': sorted(combined_profiles),
-                        'by_platform': {platform: sorted(urls) for platform, urls in platform_profiles.items()},
-                        'query_count': len(executed_queries)
-                    },
-                    execution_time=execution_time,
-                    metadata={'source': 'duckduckgo', 'queries': executed_queries}
-                )
-
+        if not api_key:
             return self._create_result(
                 target=target,
                 success=False,
-                error="No social media profiles discovered",
-                execution_time=execution_time,
-                metadata={'source': 'duckduckgo', 'queries': executed_queries}
+                error="Clearbit API key not configured"
             )
 
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            url = f"https://prospector.clearbit.com/v1/people/search?domain={quote(domain)}"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    auth=aiohttp.BasicAuth(api_key, ''),
+                    headers={'User-Agent': 'recon-again/0.1.0'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        execution_time = time.time() - start_time
+                        return self._create_result(
+                            target=target,
+                            success=False,
+                            error=f"HTTP {response.status}",
+                            execution_time=execution_time
+                        )
+
+                    data = await response.json()
+                    people = data.get('results', []) if isinstance(data, dict) else []
+                    simplified = []
+                    for person in people:
+                        if not isinstance(person, dict):
+                            continue
+                        simplified.append({
+                            'name': person.get('name'),
+                            'title': person.get('title'),
+                            'seniority': person.get('seniority'),
+                            'department': person.get('department'),
+                            'email': person.get('email'),
+                            'linkedin': person.get('linkedin'),
+                            'location': person.get('location')
+                        })
+
+                    execution_time = time.time() - start_time
+                    return self._create_result(
+                        target=target,
+                        success=True,
+                        data={
+                            'people': simplified,
+                            'people_count': len(simplified),
+                            'pending': data.get('pending') if isinstance(data, dict) else None
+                        },
+                        execution_time=execution_time,
+                        metadata={'source': 'clearbit-prospector'}
+                    )
         except Exception as e:
-            logger.error(f"Employee social media search error: {e}")
+            logger.error(f"Clearbit Prospector error: {e}")
+            return self._create_result(
+                target=target,
+                success=False,
+                error=str(e)
+            )
+
+
+class PeopleDataLabsTool(BaseTool):
+    """
+    People Data Labs person search API
+    Requires People Data Labs API key
+    """
+
+    @property
+    def name(self) -> str:
+        return "peopledatalabs"
+
+    @property
+    def description(self) -> str:
+        return "Search People Data Labs for employees and contact metadata"
+
+    @property
+    def category(self) -> str:
+        return "osint"
+
+    @property
+    def requires_auth(self) -> bool:
+        return True
+
+    async def run(self, target: str) -> ToolResult:
+        """Query People Data Labs for people associated with a company domain"""
+        import time
+
+        start_time = time.time()
+        api_key = self.config.get('peopledatalabs', {}).get('api_key')
+
+        if not api_key:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="People Data Labs API key not configured"
+            )
+
+        try:
+            domain = target.replace('https://', '').replace('http://', '').split('/')[0]
+            url = (
+                "https://api.peopledatalabs.com/v5/person/search?"
+                f"api_key={quote(api_key)}&company.domain={quote(domain)}&size=25"
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    headers={'User-Agent': 'recon-again/0.1.0'},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        execution_time = time.time() - start_time
+                        return self._create_result(
+                            target=target,
+                            success=False,
+                            error=f"HTTP {response.status}",
+                            execution_time=execution_time
+                        )
+
+                    data = await response.json()
+                    matches = data.get('data', []) if isinstance(data, dict) else []
+                    simplified = []
+                    for person in matches:
+                        if not isinstance(person, dict):
+                            continue
+                        simplified.append({
+                            'full_name': person.get('full_name'),
+                            'title': person.get('job_title'),
+                            'seniority': person.get('job_seniority'),
+                            'department': person.get('job_department'),
+                            'emails': person.get('emails'),
+                            'profiles': person.get('profiles')
+                        })
+
+                    execution_time = time.time() - start_time
+                    return self._create_result(
+                        target=target,
+                        success=True,
+                        data={
+                            'people': simplified,
+                            'people_count': len(simplified),
+                            'total_available': data.get('total') if isinstance(data, dict) else None
+                        },
+                        execution_time=execution_time,
+                        metadata={'source': 'people-data-labs'}
+                    )
+        except Exception as e:
+            logger.error(f"People Data Labs error: {e}")
             return self._create_result(
                 target=target,
                 success=False,

@@ -4,13 +4,25 @@ from .base import BaseTool, ToolResult
 
 # API-based tools (free, no installation needed)
 try:
-    from .api_tools import CrtShTool, UrlscanTool, HIBPTool, PhonebookTool, EmployeeSocialTool
+    from .api_tools import (
+        CrtShTool,
+        UrlscanTool,
+        HIBPTool,
+        PhonebookTool,
+        HunterTool,
+        ClearbitProspectorTool,
+        PeopleDataLabsTool, 
+        EmployeeSocialTool
+    )
 except ImportError:
     CrtShTool = None
     UrlscanTool = None
     HIBPTool = None
     PhonebookTool = None
     EmployeeSocialTool = None
+    HunterTool = None
+    ClearbitProspectorTool = None
+    PeopleDataLabsTool = None
 
 # Python-based tools (require dependencies)
 try:
@@ -19,6 +31,7 @@ try:
         TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
         EmailHarvesterTool
     )
+    from .web_tools import CorporateSiteScraperTool
 except ImportError:
     Sublist3rTool = None
     DNSReconTool = None
@@ -30,6 +43,7 @@ except ImportError:
     MaigretTool = None
     ArjunTool = None
     EmailHarvesterTool = None
+    CorporateSiteScraperTool = None
 
 __all__ = [
     'BaseTool',
@@ -39,6 +53,9 @@ __all__ = [
     'HIBPTool',
     'PhonebookTool',
     'EmployeeSocialTool',
+    'HunterTool',
+    'ClearbitProspectorTool',
+    'PeopleDataLabsTool',
     'Sublist3rTool',
     'DNSReconTool',
     'WaybackTool',
@@ -48,6 +65,7 @@ __all__ = [
     'HoleheTool',
     'MaigretTool',
     'ArjunTool',
-    'EmailHarvesterTool'
+    'EmailHarvesterTool',
+    'CorporateSiteScraperTool'
 ]
 

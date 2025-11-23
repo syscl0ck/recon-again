@@ -12,6 +12,7 @@ recon-again is a modern, modular reconnaissance framework that combines the powe
 - **VSCode Extension**: Full IDE integration for seamless reconnaissance workflows
 - **Async Execution**: Concurrent tool execution for maximum efficiency
 - **Result Aggregation**: Unified results format across all tools
+- **Graph Insights**: Optional Neo4j backend for relationship-driven contact intelligence
 
 ## 📋 Implemented Tools
 
@@ -26,6 +27,7 @@ recon-again is a modern, modular reconnaissance framework that combines the powe
 - **DNSRecon** - DNS record enumeration
 - **Wayback Machine** - Historical URL extraction
 - **Sherlock** - Username enumeration across platforms
+- **Corporate site scraper** - Scrape main pages for contact details and employee listings
 - **theHarvester** - Passive email and subdomain harvesting
 - **gau** - URL extraction from common sources
 - **Holehe** - Email account existence checker
@@ -39,6 +41,7 @@ recon-again is a modern, modular reconnaissance framework that combines the powe
 - Python 3.8+
 - pip
 - SQLite3 (usually pre-installed)
+- (Optional) [Neo4j](https://neo4j.com/) when storing contacts as a graph
 
 ### Basic Installation
 
@@ -109,6 +112,13 @@ cp config.example.json config.json
   },
   "hibp": {
     "api_key": "your-hibp-api-key-here-optional"
+  },
+  "graph": {
+    "enabled": true,
+    "uri": "bolt://neo4j:7687",
+    "user": "neo4j",
+    "password": "change-me",
+    "database": "neo4j"
   },
   "tools": {
     "timeout": 300,

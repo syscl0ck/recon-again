@@ -227,6 +227,68 @@ Respond with ONLY valid JSON, no markdown or code blocks.
                 return analysis
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse AI analysis: {e}")
-        
+
         return {'status': 'analysis_failed'}
+
+    async def analyze_business_profile(
+        self,
+        target: str,
+        scraper_results: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Use OpenRouter to infer business details from main site scraper data."""
+
+        if not self.enabled:
+            return {'status': 'ai_disabled'}
+
+        prompt = f"""
+You are a business intelligence analyst. Using the scraped website data below, infer structured business details for {target}.
+Focus on:
+- "business_size": approximate employee count band or revenue band (e.g., "51-200 employees" or "~$10M revenue").
+- "incorporation_date": earliest year or precise incorporation/formation date if visible.
+- "locations": list of headquarters/offices/regions mentioned.
+- "industry": concise description of what the business does.
+- "other_insights": list up to 5 notable facts (products, markets, certifications, funding, leadership hints, etc.).
+
+Scraper data:
+{json.dumps(scraper_results, indent=2)}
+
+Respond with ONLY valid JSON using these keys. Use null or empty arrays when unknown.
+"""
+
+        messages = [
+            {
+                'role': 'system',
+                'content': 'You are a precise business analyst. Respond with compact JSON only.'
+            },
+            {
+                'role': 'user',
+                'content': prompt
+            }
+        ]
+
+        response = await self._call_openrouter(messages, temperature=0.2, max_tokens=800)
+        if not response:
+            return None
+
+        try:
+            cleaned = response.strip()
+            if cleaned.startswith('```'):
+                cleaned = cleaned.split('```')[1]
+                if cleaned.startswith('json'):
+                    cleaned = cleaned[4:]
+            cleaned = cleaned.strip()
+
+            data = json.loads(cleaned)
+            if isinstance(data, dict):
+                # Ensure expected keys exist
+                data.setdefault('business_size', None)
+                data.setdefault('incorporation_date', None)
+                data.setdefault('locations', [])
+                data.setdefault('industry', None)
+                data.setdefault('other_insights', [])
+                return data
+        except json.JSONDecodeError as exc:
+            logger.warning(f"Failed to parse business profile response: {exc}")
+
+        return None
 
