@@ -27,6 +27,7 @@ recon-again is a modern, modular reconnaissance framework that combines the powe
 - **DNSRecon** - DNS record enumeration
 - **Wayback Machine** - Historical URL extraction
 - **Sherlock** - Username enumeration across platforms
+- **Corporate site scraper** - Scrape main pages for contact details and employee listings
 - **theHarvester** - Passive email and subdomain harvesting
 - **gau** - URL extraction from common sources
 - **Holehe** - Email account existence checker

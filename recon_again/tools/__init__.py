@@ -29,6 +29,7 @@ try:
         TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
         EmailHarvesterTool
     )
+    from .web_tools import CorporateSiteScraperTool
 except ImportError:
     Sublist3rTool = None
     DNSReconTool = None
@@ -40,6 +41,7 @@ except ImportError:
     MaigretTool = None
     ArjunTool = None
     EmailHarvesterTool = None
+    CorporateSiteScraperTool = None
 
 __all__ = [
     'BaseTool',
@@ -60,6 +62,7 @@ __all__ = [
     'HoleheTool',
     'MaigretTool',
     'ArjunTool',
-    'EmailHarvesterTool'
+    'EmailHarvesterTool',
+    'CorporateSiteScraperTool'
 ]
 
