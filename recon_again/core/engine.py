@@ -17,6 +17,7 @@ from ..tools.base import BaseTool, ToolResult as ToolResultBase
 from ..database import (
     GraphDatabaseClient,
     AIAnalysis,
+    BusinessProfile,
     Session,
     Target,
     ToolResult as DBToolResult,
@@ -288,6 +289,25 @@ class ReconEngine:
                     analysis_data=analysis
                 )
                 ai_analysis.save()
+
+        # Derive business intelligence from main site web scrapers
+        business_data = self._collect_main_site_data(session.results)
+        if self.ai_pilot and business_data:
+            business_profile = await self.ai_pilot.analyze_business_profile(target, business_data)
+            if business_profile:
+                session.results['business_profile'] = business_profile
+                profile_record = BusinessProfile(
+                    session_id=session_id,
+                    target=target,
+                    business_size=business_profile.get('business_size'),
+                    incorporation_date=business_profile.get('incorporation_date'),
+                    locations=business_profile.get('locations', []),
+                    industry=business_profile.get('industry'),
+                    other_insights=business_profile.get('other_insights', []),
+                    source_tools=[item['tool'] for item in business_data if 'tool' in item],
+                    analysis_data=business_profile,
+                )
+                profile_record.save()
         
         # Update session in database
         db_session = Session.get_by_session_id(session_id)
@@ -344,6 +364,10 @@ class ReconEngine:
         ai_analysis = AIAnalysis.get_by_session(session_id)
         if ai_analysis:
             results['ai_analysis'] = ai_analysis.analysis_data
+
+        business_profile = BusinessProfile.get_by_session(session_id)
+        if business_profile:
+            results['business_profile'] = business_profile.analysis_data
         
         # Reconstruct session
         session = ReconSession(
@@ -401,4 +425,34 @@ class ReconEngine:
                 'requires_auth': tool.requires_auth
             }
         return None
+
+    def _collect_main_site_data(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Collect data from web-category tools to feed into business profiling."""
+
+        main_site_data: List[Dict[str, Any]] = []
+        for tool_name, result in results.items():
+            if tool_name in {'ai_analysis', 'business_profile'}:
+                continue
+
+            tool = self.tools.get(tool_name)
+            if not tool or getattr(tool, 'category', None) != 'web':
+                continue
+
+            if isinstance(result, dict) and result.get('success') and result.get('data'):
+                trimmed_data = self._trim_data(result.get('data'))
+                main_site_data.append({'tool': tool_name, 'data': trimmed_data})
+
+        return main_site_data
+
+    def _trim_data(self, data: Any, max_items: int = 50) -> Any:
+        """Trim large datasets before sending to the AI model."""
+
+        if isinstance(data, list):
+            return data[:max_items]
+        if isinstance(data, dict):
+            trimmed = {}
+            for key, value in data.items():
+                trimmed[key] = self._trim_data(value, max_items)
+            return trimmed
+        return data
 

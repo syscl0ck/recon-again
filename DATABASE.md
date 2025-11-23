@@ -63,6 +63,23 @@ Stores AI-generated analysis
 | analysis_data | TEXT | Full JSON analysis |
 | created_at | TIMESTAMP | Creation timestamp |
 
+#### `business_profiles`
+Stores AI-derived business intelligence built from main site scraper data
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Primary key |
+| session_id | TEXT | Foreign key to sessions (unique) |
+| target | TEXT | Target analyzed |
+| business_size | TEXT | Approximate size (e.g., headcount or revenue band) |
+| incorporation_date | TEXT | Earliest incorporation/formation information |
+| locations | TEXT | JSON array of locations or headquarters |
+| industry | TEXT | Concise industry or offering description |
+| other_insights | TEXT | JSON array containing additional notable facts |
+| source_tools | TEXT | JSON array of scraper tools used |
+| analysis_data | TEXT | Full JSON response from AI |
+| created_at | TIMESTAMP | Creation timestamp |
+
 ## Usage
 
 ### Initialize Database
