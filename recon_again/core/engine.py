@@ -124,6 +124,7 @@ class ReconEngine:
         from ..tools import (
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
             HunterTool, ClearbitProspectorTool, PeopleDataLabsTool,
+            CloudEnumTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
@@ -133,6 +134,7 @@ class ReconEngine:
         tool_classes = [
             CrtShTool, UrlscanTool, HIBPTool, PhonebookTool,
             HunterTool, ClearbitProspectorTool, PeopleDataLabsTool,
+            CloudEnumTool,
             Sublist3rTool, DNSReconTool,
             WaybackTool, SherlockTool,
             TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,

@@ -13,6 +13,7 @@ try:
         ClearbitProspectorTool,
         PeopleDataLabsTool, 
         EmployeeSocialTool
+        CloudEnumTool,
     )
 except ImportError:
     CrtShTool = None
@@ -23,6 +24,7 @@ except ImportError:
     HunterTool = None
     ClearbitProspectorTool = None
     PeopleDataLabsTool = None
+    CloudEnumTool = None
 
 # Python-based tools (require dependencies)
 try:
@@ -56,6 +58,7 @@ __all__ = [
     'HunterTool',
     'ClearbitProspectorTool',
     'PeopleDataLabsTool',
+    'CloudEnumTool',
     'Sublist3rTool',
     'DNSReconTool',
     'WaybackTool',
