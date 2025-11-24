@@ -565,56 +565,60 @@ class TheHarvesterTool(BaseTool):
         try:
             domain = target.replace('https://', '').replace('http://', '').split('/')[0]
             
-            # Check if theHarvester is available
-            try:
-                result = subprocess.run(
-                    ['theHarvester', '--version'],
-                    capture_output=True,
-                    timeout=5
-                )
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                # Try alternative command
-                try:
-                    result = subprocess.run(
-                        ['theharvester', '--version'],
-                        capture_output=True,
-                        timeout=5
-                    )
-                except (FileNotFoundError, subprocess.TimeoutExpired):
-                    return self._create_result(
-                        target=target,
-                        success=False,
-                        error="theHarvester not installed. Install with: pip install theHarvester"
-                    )
-            
             # Run theHarvester with passive sources only
+            # Try different command variations
             # -b: sources (all, baidu, bing, etc.)
             # -d: domain
             # -f: output file
             output_file = Path('/tmp/theharvester_output.xml')
-            cmd = [
-                'theHarvester',
-                '-d', domain,
-                '-b', 'all',  # Use all passive sources
-                '-f', str(output_file),
-                '-l', '500'  # Limit results
+            # Try different command variations
+            cmd_variations = [
+                ['theHarvester', '-d', domain, '-b', 'all', '-f', str(output_file), '-l', '500'],
+                ['theharvester', '-d', domain, '-b', 'all', '-f', str(output_file), '-l', '500'],
+                ['python3', '-m', 'theHarvester', '-d', domain, '-b', 'all', '-f', str(output_file), '-l', '500'],
             ]
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            process = None
+            for cmd in cmd_variations:
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    break
+                except FileNotFoundError:
+                    continue
+            
+            if process is None:
+                return self._create_result(
+                    target=target,
+                    success=False,
+                    error="theHarvester not found. Install with: pip install theHarvester"
+                )
             
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=self.timeout
             )
             
+            # Check return code
+            return_code = await process.wait()
+            
             # Parse results
             emails = []
             hosts = []
             ips = []
+            
+            # Also check stdout for results (theHarvester might output to stdout)
+            stdout_text = stdout.decode('utf-8', errors='ignore') if stdout else ''
+            stderr_text = stderr.decode('utf-8', errors='ignore') if stderr else ''
+            
+            # Extract emails from stdout/stderr as fallback
+            if stdout_text:
+                email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                found_emails = re.findall(email_pattern, stdout_text)
+                emails.extend(found_emails)
             
             if output_file.exists():
                 # Parse XML output
@@ -640,39 +644,55 @@ class TheHarvesterTool(BaseTool):
                 except Exception as e:
                     logger.debug(f"XML parsing failed: {e}, trying text parsing")
                     # Fallback to text parsing
-                    with open(output_file, 'r') as f:
-                        content = f.read()
-                        # Extract emails
-                        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-                        emails = list(set(re.findall(email_pattern, content)))
-                        # Extract hosts/domains
-                        host_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
-                        hosts = [h for h in re.findall(host_pattern, content) if domain in h]
+                    try:
+                        with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            # Extract emails
+                            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                            found_emails = re.findall(email_pattern, content)
+                            emails.extend(found_emails)
+                            # Extract hosts/domains
+                            host_pattern = r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+                            found_hosts = re.findall(host_pattern, content)
+                            hosts.extend([h for h in found_hosts if domain in h])
+                    except Exception as parse_error:
+                        logger.debug(f"Text parsing also failed: {parse_error}")
                 
-                output_file.unlink()
+                try:
+                    output_file.unlink()
+                except:
+                    pass
             
             execution_time = time.time() - start_time
+            
+            # Clean and deduplicate
+            emails = list(set([e.lower() for e in emails if e and '@' in e]))
+            hosts = list(set([h for h in hosts if h]))
+            ips = list(set([ip for ip in ips if ip]))
             
             if emails or hosts or ips:
                 return self._create_result(
                     target=target,
                     success=True,
                     data={
-                        'emails': list(set(emails)),
-                        'hosts': list(set(hosts)),
-                        'ips': list(set(ips)),
-                        'email_count': len(set(emails)),
-                        'host_count': len(set(hosts)),
-                        'ip_count': len(set(ips))
+                        'emails': emails,
+                        'hosts': hosts,
+                        'ips': ips,
+                        'email_count': len(emails),
+                        'host_count': len(hosts),
+                        'ip_count': len(ips)
                     },
                     execution_time=execution_time,
-                    metadata={'source': 'theHarvester'}
+                    metadata={'source': 'theHarvester', 'return_code': return_code}
                 )
             else:
+                error_msg = "No results found"
+                if stderr_text:
+                    error_msg += f" (stderr: {stderr_text[:200]})"
                 return self._create_result(
                     target=target,
                     success=False,
-                    error="No results found or tool execution failed",
+                    error=error_msg,
                     execution_time=execution_time
                 )
         except asyncio.TimeoutError:
@@ -716,28 +736,21 @@ class GauTool(BaseTool):
         try:
             domain = target.replace('https://', '').replace('http://', '').split('/')[0]
             
-            # Check if gau is available
+            # Run gau - try to run directly, will catch FileNotFoundError if not available
+            cmd = ['gau', domain, '--subs']
+            
             try:
-                result = subprocess.run(
-                    ['gau', '--version'],
-                    capture_output=True,
-                    timeout=5
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
                 )
-            except (FileNotFoundError, subprocess.TimeoutExpired):
+            except FileNotFoundError:
                 return self._create_result(
                     target=target,
                     success=False,
                     error="gau not installed. Install from: https://github.com/lc/gau"
                 )
-            
-            # Run gau
-            cmd = ['gau', domain, '--subs']
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
             
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),

@@ -204,10 +204,13 @@ class ReconEngine:
         logger.info(f"Starting recon session {session_id} for {target}")
         logger.info(f"Execution plan: {execution_plan}")
         
+        # Categorize tools into phases
+        phase1_tools, phase2_tools, phase3_tools = self._categorize_tools(execution_plan, target)
+        
         # Execute tools concurrently (with limits)
         semaphore = asyncio.Semaphore(self.config['tools']['max_concurrent'])
         
-        async def run_tool(tool_name: str):
+        async def run_tool(tool_name: str, tool_target: str = None):
             if tool_name not in self.tools:
                 logger.warning(f"Tool {tool_name} not found")
                 return None
@@ -215,8 +218,9 @@ class ReconEngine:
             async with semaphore:
                 try:
                     tool = self.tools[tool_name]
-                    logger.info(f"Executing {tool_name} on {target}")
-                    result = await tool.run(target)
+                    actual_target = tool_target or target
+                    logger.info(f"Executing {tool_name} on {actual_target}")
+                    result = await tool.run(actual_target)
                     session.tools_executed.append(tool_name)
                     session.results[tool_name] = result.to_dict()
                     
@@ -236,7 +240,7 @@ class ReconEngine:
                     db_result = DBToolResult(
                         session_id=session_id,
                         tool_name=tool_name,
-                        target=target,
+                        target=actual_target,
                         success=result.success,
                         data=result.data,
                         error=result.error,
@@ -259,7 +263,7 @@ class ReconEngine:
                     db_result = DBToolResult(
                         session_id=session_id,
                         tool_name=tool_name,
-                        target=target,
+                        target=actual_target if 'actual_target' in locals() else target,
                         success=False,
                         error=str(e),
                         execution_time=0.0,
@@ -269,9 +273,53 @@ class ReconEngine:
                     
                     return None
         
-        # Execute all tools
-        tasks = [run_tool(tool_name) for tool_name in execution_plan]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Phase 1: Email discovery and general reconnaissance
+        logger.info(f"Phase 1: Executing {len(phase1_tools)} email discovery and reconnaissance tools")
+        tasks = [run_tool(tool_name) for tool_name in phase1_tools]
+        phase1_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Extract emails and usernames from Phase 1 results
+        discovered_emails, discovered_usernames, discovered_urls = self._extract_discovered_data(session.results)
+        logger.info(f"Phase 1 complete: Found {len(discovered_emails)} emails, {len(discovered_usernames)} usernames, {len(discovered_urls)} URLs")
+        
+        # Phase 2: User enumeration with discovered emails/usernames
+        if phase2_tools and (discovered_emails or discovered_usernames):
+            logger.info(f"Phase 2: Executing {len(phase2_tools)} user enumeration tools with discovered data")
+            phase2_tasks = []
+            for tool_name in phase2_tools:
+                if tool_name == 'holehe':
+                    # Run holehe for each discovered email
+                    for email in discovered_emails:
+                        phase2_tasks.append(run_tool(tool_name, email))
+                elif tool_name in ['sherlock', 'maigret']:
+                    # Run username enumeration for each discovered username
+                    for username in discovered_usernames:
+                        phase2_tasks.append(run_tool(tool_name, username))
+                else:
+                    phase2_tasks.append(run_tool(tool_name))
+            phase2_results = await asyncio.gather(*phase2_tasks, return_exceptions=True)
+        else:
+            logger.info("Phase 2: Skipped (no emails/usernames discovered or no user enumeration tools)")
+            phase2_results = []
+        
+        # Phase 3: URL-based tools with discovered URLs
+        if phase3_tools and discovered_urls:
+            logger.info(f"Phase 3: Executing {len(phase3_tools)} URL-based tools with discovered URLs")
+            phase3_tasks = []
+            for tool_name in phase3_tools:
+                if tool_name == 'arjun':
+                    # Run arjun for each discovered URL
+                    for url in discovered_urls[:10]:  # Limit to first 10 URLs
+                        phase3_tasks.append(run_tool(tool_name, url))
+                else:
+                    phase3_tasks.append(run_tool(tool_name))
+            phase3_results = await asyncio.gather(*phase3_tasks, return_exceptions=True)
+        else:
+            logger.info("Phase 3: Skipped (no URLs discovered or no URL-based tools)")
+            phase3_results = []
+        
+        # Combine all results
+        results = phase1_results + phase2_results + phase3_results
         
         # Analyze results with AI if enabled
         if self.ai_pilot and results:
@@ -457,4 +505,91 @@ class ReconEngine:
                 trimmed[key] = self._trim_data(value, max_items)
             return trimmed
         return data
+    
+    def _categorize_tools(self, execution_plan: List[str], target: str) -> tuple:
+        """
+        Categorize tools into execution phases:
+        Phase 1: Email discovery and general reconnaissance (domain-based)
+        Phase 2: User enumeration (requires emails/usernames)
+        Phase 3: URL-based tools (requires URLs)
+        """
+        # Tools that discover emails/usernames
+        email_discovery_tools = {
+            'corporate_site', 'theharvester', 'emailharvester', 
+            'hunter', 'phonebook', 'peopledatalabs', 'employee_social'
+        }
+        
+        # User enumeration tools (need emails/usernames)
+        user_enum_tools = {'holehe', 'sherlock', 'maigret'}
+        
+        # URL-based tools (need URLs)
+        url_based_tools = {'arjun'}
+        
+        # General reconnaissance tools (domain-based, run first)
+        general_recon_tools = {
+            'crt_sh', 'urlscan', 'hibp', 'sublist3r', 'dnsrecon', 
+            'wayback', 'gau', 'cloud_enum'
+        }
+        
+        phase1 = []
+        phase2 = []
+        phase3 = []
+        
+        for tool_name in execution_plan:
+            if tool_name in user_enum_tools:
+                phase2.append(tool_name)
+            elif tool_name in url_based_tools:
+                phase3.append(tool_name)
+            else:
+                phase1.append(tool_name)
+        
+        return phase1, phase2, phase3
+    
+    def _extract_discovered_data(self, results: Dict[str, Any]) -> tuple:
+        """
+        Extract emails, usernames, and URLs from Phase 1 results.
+        Returns: (emails, usernames, urls)
+        """
+        emails = set()
+        usernames = set()
+        urls = set()
+        
+        for tool_name, result in results.items():
+            if not isinstance(result, dict) or not result.get('success'):
+                continue
+            
+            data = result.get('data', {})
+            if not isinstance(data, dict):
+                continue
+            
+            # Extract emails
+            tool_emails = data.get('emails', [])
+            if isinstance(tool_emails, list):
+                for email in tool_emails:
+                    if isinstance(email, str) and '@' in email:
+                        emails.add(email.lower())
+                        # Extract username from email
+                        username = email.split('@')[0]
+                        if username:
+                            usernames.add(username)
+            
+            # Extract URLs
+            tool_urls = data.get('urls', [])
+            if isinstance(tool_urls, list):
+                for url in tool_urls:
+                    if isinstance(url, str) and (url.startswith('http://') or url.startswith('https://')):
+                        urls.add(url)
+            
+            # Extract from corporate_site specific structure
+            if tool_name == 'corporate_site':
+                corp_emails = data.get('emails', [])
+                if isinstance(corp_emails, list):
+                    for email in corp_emails:
+                        if isinstance(email, str) and '@' in email:
+                            emails.add(email.lower())
+                            username = email.split('@')[0]
+                            if username:
+                                usernames.add(username)
+        
+        return list(emails), list(usernames), list(urls)
 

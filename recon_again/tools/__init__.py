@@ -12,7 +12,7 @@ try:
         HunterTool,
         ClearbitProspectorTool,
         PeopleDataLabsTool, 
-        EmployeeSocialTool
+        EmployeeSocialTool,
         CloudEnumTool,
     )
 except ImportError:
