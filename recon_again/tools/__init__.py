@@ -11,8 +11,8 @@ try:
         PhonebookTool,
         HunterTool,
         ClearbitProspectorTool,
-        PeopleDataLabsTool, 
-        EmployeeSocialTool
+        PeopleDataLabsTool,
+        EmployeeSocialTool,
         CloudEnumTool,
     )
 except ImportError:
@@ -33,7 +33,7 @@ try:
         TheHarvesterTool, GauTool, HoleheTool, MaigretTool, ArjunTool,
         EmailHarvesterTool
     )
-    from .web_tools import CorporateSiteScraperTool
+    from .web_tools import CorporateSiteScraperTool, JobBoardTool
 except ImportError:
     Sublist3rTool = None
     DNSReconTool = None
@@ -46,6 +46,7 @@ except ImportError:
     ArjunTool = None
     EmailHarvesterTool = None
     CorporateSiteScraperTool = None
+    JobBoardTool = None
 
 __all__ = [
     'BaseTool',
@@ -69,6 +70,7 @@ __all__ = [
     'MaigretTool',
     'ArjunTool',
     'EmailHarvesterTool',
-    'CorporateSiteScraperTool'
+    'CorporateSiteScraperTool',
+    'JobBoardTool'
 ]
 
