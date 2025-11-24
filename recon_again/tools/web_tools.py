@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import re
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urljoin
 
 import aiohttp
@@ -204,5 +204,147 @@ class CorporateSiteScraperTool(BaseTool):
                 "pages_retrieved": len(pages_scraped),
                 "employees_found": len(employees),
             },
+        )
+
+
+class JobBoardTool(BaseTool):
+    """Discover current job listings from common applicant tracking systems."""
+
+    @property
+    def name(self) -> str:
+        return "job_board"
+
+    @property
+    def description(self) -> str:
+        return "Collect open roles from Lever and Greenhouse job boards"
+
+    @property
+    def category(self) -> str:
+        return "web"
+
+    def _extract_slug(self, target: str) -> str:
+        cleaned = target.replace("https://", "").replace("http://", "")
+        cleaned = cleaned.split("/", 1)[0]
+        return cleaned.split(".")[0].strip()
+
+    async def _fetch_json(
+        self, session: aiohttp.ClientSession, url: str
+    ) -> Optional[Any]:
+        try:
+            async with session.get(
+                url,
+                headers={"User-Agent": "recon-again/0.1.0"},
+                timeout=aiohttp.ClientTimeout(total=min(self.timeout, 30)),
+            ) as response:
+                if response.status != 200:
+                    logger.debug("Non-200 status %s for %s", response.status, url)
+                    return None
+                return await response.json()
+        except asyncio.TimeoutError:
+            logger.debug("Timeout while fetching %s", url)
+        except Exception as exc:  # pragma: no cover - network errors
+            logger.debug("Request error for %s: %s", url, exc)
+        return None
+
+    def _parse_lever(self, payload: Any) -> List[Dict[str, Any]]:
+        jobs: List[Dict[str, Any]] = []
+        if not isinstance(payload, list):
+            return jobs
+
+        for posting in payload:
+            if not isinstance(posting, dict):
+                continue
+            jobs.append(
+                {
+                    "title": posting.get("text"),
+                    "location": (posting.get("categories") or {}).get("location"),
+                    "team": (posting.get("categories") or {}).get("team"),
+                    "url": posting.get("hostedUrl") or posting.get("applyUrl"),
+                    "source": "lever",
+                }
+            )
+        return jobs
+
+    def _parse_greenhouse(self, payload: Any) -> List[Dict[str, Any]]:
+        jobs: List[Dict[str, Any]] = []
+        if not isinstance(payload, dict):
+            return jobs
+
+        for posting in payload.get("jobs", []):
+            if not isinstance(posting, dict):
+                continue
+            jobs.append(
+                {
+                    "title": posting.get("title"),
+                    "location": posting.get("location", {}).get("name")
+                    if isinstance(posting.get("location"), dict)
+                    else None,
+                    "department": posting.get("departments", [{}])[0].get("name")
+                    if isinstance(posting.get("departments"), list)
+                    and posting.get("departments")
+                    else None,
+                    "url": posting.get("absolute_url"),
+                    "source": "greenhouse",
+                }
+            )
+        return jobs
+
+    async def run(self, target: str) -> ToolResult:
+        import time
+
+        start_time = time.time()
+        slug = self._extract_slug(target)
+
+        if not slug:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="Unable to derive company slug from target",
+            )
+
+        endpoints = [
+            {
+                "provider": "lever",
+                "url": f"https://api.lever.co/v0/postings/{slug}?mode=json",
+                "parser": self._parse_lever,
+            },
+            {
+                "provider": "greenhouse",
+                "url": f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
+                "parser": self._parse_greenhouse,
+            },
+        ]
+
+        postings: List[Dict[str, Any]] = []
+        sources_checked: List[str] = []
+
+        async with aiohttp.ClientSession() as session:
+            for endpoint in endpoints:
+                payload = await self._fetch_json(session, endpoint["url"])
+                sources_checked.append(endpoint["provider"])
+                if not payload:
+                    continue
+                postings.extend(endpoint["parser"](payload))
+
+        execution_time = time.time() - start_time
+
+        if not postings:
+            return self._create_result(
+                target=target,
+                success=False,
+                error="No job listings discovered from common boards",
+                execution_time=execution_time,
+                metadata={"sources_checked": sources_checked},
+            )
+
+        return self._create_result(
+            target=target,
+            success=True,
+            data={
+                "postings": postings,
+                "total_listings": len(postings),
+            },
+            execution_time=execution_time,
+            metadata={"sources_checked": sources_checked},
         )
 
